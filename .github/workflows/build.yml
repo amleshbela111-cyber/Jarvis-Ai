@@ -1,1 +1,233 @@
+name: Build Jarvis APK
 
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install Android SDK manually
+        run: |
+          sudo apt-get install -y wget unzip > /dev/null 2>&1
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          cd $HOME/android-sdk/cmdline-tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -O tools.zip
+          unzip -q tools.zip && mv cmdline-tools latest && rm tools.zip
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+          yes | sdkmanager --licenses > /dev/null 2>&1
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
+
+      - name: Create all Jarvis project files
+        run: |
+          python3 << 'PYEOF'
+          import os
+
+          def write(path, content):
+              d = os.path.dirname(path)
+              if d: os.makedirs(d, exist_ok=True)
+              open(path, 'w').write(content)
+
+          write('settings.gradle', "include ':app'\nrootProject.name = \"Jarvis\"\n")
+
+          write('build.gradle', """buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.5.0'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
+              }
+          }
+          allprojects { repositories { google(); mavenCentral() } }
+          """)
+
+          write('gradle.properties', "android.useAndroidX=true\nkotlin.code.style=official\n")
+
+          write('app/build.gradle', """apply plugin: 'com.android.application'
+          apply plugin: 'kotlin-android'
+          android {
+              namespace 'com.jarvis.ai'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.jarvis.ai"
+                  minSdk 26; targetSdk 34; versionCode 1; versionName "1.0"
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+          }
+          """)
+
+          write('app/src/main/AndroidManifest.xml', """<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application android:allowBackup="true" android:label="Jarvis" android:theme="@style/Theme.Jarvis">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service android:name=".VoiceListenerService" android:foregroundServiceType="microphone" android:exported="false" />
+                  <service android:name=".OverlayService" android:exported="false" />
+                  <service android:name=".JarvisAccessibilityService"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility_service_config" />
+                  </service>
+              </application>
+          </manifest>
+          """)
+
+          write('app/src/main/res/values/strings.xml', '<resources>\n    <string name="app_name">Jarvis</string>\n    <string name="accessibility_service_description">Jarvis screen reader</string>\n</resources>\n')
+          write('app/src/main/res/values/themes.xml', '<resources>\n    <style name="Theme.Jarvis" parent="Theme.AppCompat.NoActionBar" />\n</resources>\n')
+          write('app/src/main/res/xml/accessibility_service_config.xml', '<?xml version="1.0" encoding="utf-8"?>\n<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"\n    android:accessibilityEventTypes="typeAllMask"\n    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"\n    android:accessibilityFeedbackType="feedbackGeneric"\n    android:canRetrieveWindowContent="true"\n    android:notificationTimeout="100"\n    android:description="@string/accessibility_service_description" />\n')
+          write('app/src/main/res/layout/activity_main.xml', '<?xml version="1.0" encoding="utf-8"?>\n<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"\n    android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000000">\n    <ImageButton android:id="@+id/micButton"\n        android:layout_width="120dp" android:layout_height="120dp"\n        android:layout_gravity="center"\n        android:background="@android:drawable/btn_default"\n        android:src="@android:drawable/ic_btn_speak_now"\n        android:contentDescription="Start Jarvis" />\n</FrameLayout>\n')
+
+          write('app/src/main/java/com/jarvis/ai/MainActivity.kt', """package com.jarvis.ai
+          import android.Manifest; import android.content.Intent; import android.content.pm.PackageManager
+          import android.net.Uri; import android.os.Build; import android.os.Bundle; import android.provider.Settings
+          import android.widget.ImageButton; import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.ActivityCompat; import androidx.core.content.ContextCompat
+          class MainActivity : AppCompatActivity() {
+              private val perms = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s); setContentView(R.layout.activity_main)
+                  findViewById<ImageButton>(R.id.micButton).setOnClickListener {
+                      if (!hasPerms()) ActivityCompat.requestPermissions(this, perms, 100)
+                      else if (!Settings.canDrawOverlays(this)) startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                      else startJarvis()
+                  }
+              }
+              private fun hasPerms() = perms.all { ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED }
+              private fun startJarvis() {
+                  val i = Intent(this, VoiceListenerService::class.java)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+                  startService(Intent(this, OverlayService::class.java))
+              }
+          }
+          """)
+
+          write('app/src/main/java/com/jarvis/ai/VoiceListenerService.kt', """package com.jarvis.ai
+          import android.app.*; import android.content.Intent; import android.os.*; import android.speech.*
+          import androidx.core.app.NotificationCompat
+          class VoiceListenerService : Service() {
+              private var sr: SpeechRecognizer? = null; private val ch = "jarvis_ch"
+              override fun onCreate() {
+                  super.onCreate()
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                      getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(ch, "Jarvis", NotificationManager.IMPORTANCE_LOW))
+                  startForeground(1, NotificationCompat.Builder(this, ch).setContentTitle("Jarvis listening").setSmallIcon(android.R.drawable.ic_btn_speak_now).setOngoing(true).build())
+                  listen()
+              }
+              override fun onStartCommand(i: Intent?, f: Int, id: Int) = START_STICKY
+              private fun listen() {
+                  sr = SpeechRecognizer.createSpeechRecognizer(this)
+                  val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply { putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM) }
+                  sr?.setRecognitionListener(object : RecognitionListener {
+                      override fun onResults(r: Bundle) { r.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { CommandRouter.handle(applicationContext, it) }; listen() }
+                      override fun onError(e: Int) { listen() }
+                      override fun onReadyForSpeech(p: Bundle?) {}; override fun onBeginningOfSpeech() {}
+                      override fun onRmsChanged(r: Float) {}; override fun onBufferReceived(b: ByteArray?) {}
+                      override fun onEndOfSpeech() {}; override fun onPartialResults(p: Bundle?) {}; override fun onEvent(t: Int, p: Bundle?) {}
+                  }); sr?.startListening(i)
+              }
+              override fun onDestroy() { sr?.destroy(); super.onDestroy() }
+              override fun onBind(i: Intent?): IBinder? = null
+          }
+          """)
+
+          write('app/src/main/java/com/jarvis/ai/OverlayService.kt', """package com.jarvis.ai
+          import android.app.Service; import android.content.Intent; import android.graphics.PixelFormat
+          import android.os.IBinder; import android.view.*; import android.widget.ImageView
+          class OverlayService : Service() {
+              private lateinit var wm: WindowManager; private var v: ImageView? = null
+              override fun onCreate() {
+                  super.onCreate(); wm = getSystemService(WINDOW_SERVICE) as WindowManager
+                  v = ImageView(this).apply { setImageResource(android.R.drawable.ic_btn_speak_now) }
+                  val p = WindowManager.LayoutParams(120, 120, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT)
+                  p.gravity = Gravity.TOP or Gravity.START; p.x = 0; p.y = 100; wm.addView(v, p)
+              }
+              override fun onDestroy() { v?.let { wm.removeView(it) }; super.onDestroy() }
+              override fun onBind(i: Intent?): IBinder? = null
+          }
+          """)
+
+          write('app/src/main/java/com/jarvis/ai/JarvisAccessibilityService.kt', """package com.jarvis.ai
+          import android.accessibilityservice.AccessibilityService; import android.content.Intent
+          import android.view.accessibility.*
+          class JarvisAccessibilityService : AccessibilityService() {
+              companion object { var instance: JarvisAccessibilityService? = null }
+              override fun onServiceConnected() { super.onServiceConnected(); instance = this }
+              override fun onAccessibilityEvent(e: AccessibilityEvent?) {}; override fun onInterrupt() {}
+              fun getScreenText(): String {
+                  val b = StringBuilder()
+                  fun col(n: AccessibilityNodeInfo) { n.text?.let { b.append(it).append(" ") }; for (i in 0 until n.childCount) n.getChild(i)?.let { col(it) } }
+                  rootInActiveWindow?.let { col(it) }; return b.toString()
+              }
+              fun openApp(pkg: String) { applicationContext.packageManager.getLaunchIntentForPackage(pkg)?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); applicationContext.startActivity(this) } }
+          }
+          """)
+
+          write('app/src/main/java/com/jarvis/ai/CommandRouter.kt', """package com.jarvis.ai
+          import android.content.Context; import android.util.Log
+          object CommandRouter {
+              fun handle(ctx: Context, cmd: String) {
+                  Log.d("Jarvis", "Command: $cmd")
+                  val l = cmd.lowercase()
+                  when {
+                      l.contains("open") -> Log.d("Jarvis", "TODO: open app")
+                      l.contains("photo") || l.contains("camera") -> Log.d("Jarvis", "TODO: camera")
+                      l.contains("screen") -> Log.d("Jarvis", "Screen: " + (JarvisAccessibilityService.instance?.getScreenText() ?: ""))
+                      else -> Log.d("Jarvis", "Unknown: $cmd")
+                  }
+              }
+          }
+          """)
+          print("All files created!")
+          PYEOF
+
+      - name: Install Gradle and build wrapper
+        run: |
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip
+          sudo unzip -q /tmp/gradle.zip -d /opt
+          sudo ln -sf /opt/gradle-8.7/bin/gradle /usr/local/bin/gradle
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jarvis-debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+          
