@@ -5,19 +5,14 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-/**
- * Stores the Gemini API key encrypted at rest (AES-256 via the Android Keystore).
- * The key is never written to source files, logs, or the APK.
- */
 class ApiKeyStore(context: Context) {
 
     private val prefs: SharedPreferences by lazy {
-        val app = context.applicationContext
-        val masterKey = MasterKey.Builder(app)
+        val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
         EncryptedSharedPreferences.create(
-            app,
+            context,
             FILE_NAME,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
@@ -26,19 +21,19 @@ class ApiKeyStore(context: Context) {
     }
 
     fun save(apiKey: String) {
-        prefs.edit().putString(KEY_API, apiKey.trim()).apply()
+        prefs.edit().putString(KEY_NAME, apiKey).apply()
     }
 
-    fun load(): String? = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
+    fun load(): String? = runCatching { prefs.getString(KEY_NAME, null) }.getOrNull()
 
-    fun hasKey(): Boolean = runCatching { load() != null }.getOrDefault(false)
+    fun hasKey(): Boolean = runCatching { !prefs.getString(KEY_NAME, null).isNullOrBlank() }.getOrDefault(false)
 
     fun clear() {
-        prefs.edit().remove(KEY_API).apply()
+        prefs.edit().remove(KEY_NAME).apply()
     }
 
     private companion object {
         const val FILE_NAME = "jarvis_secure_prefs"
-        const val KEY_API = "gemini_api_key"
+        const val KEY_NAME = "gemini_api_key"
     }
 }
