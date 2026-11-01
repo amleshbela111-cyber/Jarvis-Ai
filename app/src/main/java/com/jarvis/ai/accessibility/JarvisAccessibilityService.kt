@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -43,12 +44,77 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     // ---------- Node actions (preferred) ----------
 
-    /** Clicks the nearest clickable element whose text, description, or hint contains [label]. */
-    fun clickByLabel(label: String): Boolean = withNodes { nodes ->
-        val target = nodes.firstOrNull { it.isVisibleToUser && labelMatches(it, label) }
-            ?: return@withNodes false
-        val clickable = clickableAncestorOrSelf(target) ?: return@withNodes false
-        clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    /**
+     * Clicks a visible element matching [label]. Ordinal words pick the nth match:
+     * "first short" clicks the first item that mentions "short". If the element refuses
+     * an accessibility click (common in many apps), Jarvis taps the centre of it on screen.
+     */
+    suspend fun clickByLabel(label: String): Boolean {
+        val (ordinal, words) = parseOrdinal(label)
+        val bounds = Rect()
+        val outcome = withNodes { nodes ->
+            val matches = nodes.filter { node ->
+                node.isVisibleToUser &&
+                    (if (words.isEmpty()) node.isClickable else words.all { labelMatches(node, it) })
+            }
+            val target = matches.getOrNull(ordinal) ?: return@withNodes OUTCOME_NOT_FOUND
+            val clickable = clickableAncestorOrSelf(target)
+            if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return@withNodes OUTCOME_CLICKED
+            }
+            target.getBoundsInScreen(bounds)
+            OUTCOME_NEEDS_TAP
+        }
+        return when (outcome) {
+            OUTCOME_CLICKED -> true
+            OUTCOME_NEEDS_TAP -> !bounds.isEmpty && tapPoint(bounds.exactCenterX(), bounds.exactCenterY())
+            else -> false
+        }
+    }
+
+    /** Taps one screen point with a short gesture. True only when Android completes it. */
+    suspend fun tapPoint(x: Float, y: Float): Boolean {
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x + 1f, y + 1f)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, TAP_DURATION_MS))
+            .build()
+        return dispatchAndAwait(gesture)
+    }
+
+    private suspend fun dispatchAndAwait(gesture: GestureDescription): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            val dispatched = dispatchGesture(
+                gesture,
+                object : AccessibilityService.GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        if (continuation.isActive) continuation.resume(true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        if (continuation.isActive) continuation.resume(false)
+                    }
+                },
+                null
+            )
+            if (!dispatched && continuation.isActive) continuation.resume(false)
+        }
+
+    private fun parseOrdinal(label: String): Pair<Int, List<String>> {
+        var ordinal = 0
+        val words = label.trim().lowercase().split(Regex("\\s+")).filter { word ->
+            when {
+                word.isEmpty() || word in IGNORED_WORDS -> false
+                ORDINALS.containsKey(word) -> {
+                    ordinal = ORDINALS.getValue(word)
+                    false
+                }
+                else -> true
+            }
+        }
+        return ordinal to words
     }
 
     /** Scrolls the first visible scrollable area. "down" reveals content below. */
@@ -218,5 +284,19 @@ class JarvisAccessibilityService : AccessibilityService() {
 
         private const val SWIPE_DURATION_MS = 300L
         private const val MAX_PARENT_DEPTH = 6
+        private const val TAP_DURATION_MS = 80L
+        private const val OUTCOME_NOT_FOUND = 0
+        private const val OUTCOME_CLICKED = 1
+        private const val OUTCOME_NEEDS_TAP = 2
+
+        private val ORDINALS = mapOf(
+            "first" to 0, "1st" to 0, "pehla" to 0, "pehli" to 0,
+            "second" to 1, "2nd" to 1, "doosra" to 1, "doosri" to 1,
+            "third" to 2, "3rd" to 2, "teesra" to 2, "teesri" to 2,
+            "fourth" to 3, "4th" to 3, "chautha" to 3,
+            "fifth" to 4, "5th" to 4
+        )
+
+        private val IGNORED_WORDS = setOf("click", "tap", "on", "the", "button", "karo", "kar", "do", "par", "pe", "ko", "dabao")
     }
 }

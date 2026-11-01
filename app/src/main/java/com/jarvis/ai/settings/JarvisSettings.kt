@@ -29,13 +29,17 @@ class JarvisSettings(context: Context) {
         }
 
     var geminiModel: String
-        get() = prefs.getString(KEY_GEMINI_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
+        get() {
+            val saved = prefs.getString(KEY_GEMINI_MODEL, null)
+            // Models retired by Google (gemini-2.0-*) are replaced with the current default.
+            return if (saved.isNullOrBlank() || saved.startsWith("gemini-2.0")) DEFAULT_MODEL else saved
+        }
         set(value) {
             prefs.edit().putString(KEY_GEMINI_MODEL, value).apply()
         }
 
     companion object {
-        const val DEFAULT_MODEL = "gemini-2.0-flash-lite"
+        const val DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
         private const val PREFS_NAME = "jarvis_settings"
         private const val KEY_LANGUAGE = "speech_language"

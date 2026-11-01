@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import com.jarvis.ai.device.Outcome
+import kotlinx.coroutines.delay
 
 /**
  * Screen actions for voice commands. Each call checks that the accessibility
@@ -26,13 +27,14 @@ class AccessibilityActions(private val context: Context) {
         )
     }
 
+    /** Retries for a short time, because a newly opened app may still be drawing its screen. */
     suspend fun tap(label: String): Outcome {
         val service = JarvisAccessibilityService.instance ?: return notEnabled()
-        return if (service.clickByLabel(label)) {
-            Outcome(true, "Clicked \"$label\".")
-        } else {
-            Outcome(false, "Could not find a clickable \"$label\" on screen.")
+        repeat(TAP_ATTEMPTS) { attempt ->
+            if (service.clickByLabel(label)) return Outcome(true, "Clicked \"$label\".")
+            if (attempt < TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
         }
+        return Outcome(false, "Could not find a clickable \"$label\" on screen. Screen par wo item dikh raha hai ya nahi, check karein.")
     }
 
     fun scroll(direction: String): Outcome {
@@ -81,5 +83,7 @@ class AccessibilityActions(private val context: Context) {
 
     private companion object {
         const val MAX_READ_CHARS = 600
+        const val TAP_ATTEMPTS = 6
+        const val TAP_RETRY_MS = 500L
     }
 }
