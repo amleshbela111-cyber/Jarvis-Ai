@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
+/** Stores the Gemini API key encrypted on the phone. Reads never throw; they return null instead. */
 class ApiKeyStore(context: Context) {
 
     private val prefs: SharedPreferences by lazy {

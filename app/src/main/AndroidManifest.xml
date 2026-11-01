@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Stage 10: lets Jarvis open the installer for a downloaded APK. The user must allow it per app. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Background listening: lets the microphone keep working while other apps are open. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <uses-feature
         android:name="android.hardware.microphone"
@@ -68,6 +70,12 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- Always-on listening. Runs as a microphone foreground service with a visible notification. -->
+        <service
+            android:name=".voice.ListeningService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Screen reading. Runs only after the user grants screen capture. -->
         <service

@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- Only the downloads folder inside the app's cache is shared, and only with the installer. -->
-    <cache-path name="downloads" path="downloads/" />
-</paths>

@@ -36,7 +36,7 @@
 
 **Tap.** Works on visible text or button labels. A tap means the app accepted the click, not that the app did what you wanted. Apps that draw their own screens may not expose labels.
 
-**Background listening.** Android 12 and newer stop the microphone for voice recognition when the app is not on screen. So voice commands work while Jarvis is open. Always-on listening is not promised, and it is not built. The screen-reading notification keeps the app alive while it is on. Some phone makers (Xiaomi, Realme, OPPO) close background apps aggressively, so turn off battery optimization for Jarvis AI in Android Settings.
+**Background listening.** Android 12 and newer stop the microphone for voice recognition when the app is not on screen. So voice commands work while Jarvis is open. Jarvis now runs a microphone foreground service with a notification, so it keeps listening while other apps (such as YouTube) are open. Tap PAUSE to stop listening. Some phone makers may still stop background services, so keep battery optimization off for Jarvis AI. Some phone makers (Xiaomi, Realme, OPPO) close background apps aggressively, so turn off battery optimization for Jarvis AI in Android Settings.
 
 **Wake phrase.** Not built. Android background mic limits mean a wake phrase cannot be promised on every phone.
 

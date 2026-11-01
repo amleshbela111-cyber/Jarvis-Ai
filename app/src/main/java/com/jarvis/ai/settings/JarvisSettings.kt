@@ -35,7 +35,7 @@ class JarvisSettings(context: Context) {
         }
 
     companion object {
-        const val DEFAULT_MODEL = "gemini-2.0-flash"
+        const val DEFAULT_MODEL = "gemini-2.0-flash-lite"
 
         private const val PREFS_NAME = "jarvis_settings"
         private const val KEY_LANGUAGE = "speech_language"

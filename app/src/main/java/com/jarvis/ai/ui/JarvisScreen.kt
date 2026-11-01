@@ -60,6 +60,7 @@ import com.jarvis.ai.ui.theme.JarvisSurface
 import com.jarvis.ai.ui.theme.JarvisText
 import com.jarvis.ai.viewmodel.JarvisUiState
 import com.jarvis.ai.viewmodel.JarvisViewModel
+import com.jarvis.ai.voice.ListeningService
 
 /** Root composable: decides between the home screen and settings. */
 @Composable
@@ -72,7 +73,6 @@ fun JarvisApp(viewModel: JarvisViewModel) {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         viewModel.setMicPermission(granted)
-        if (granted) viewModel.onMicButton()
     }
 
     val projectionLauncher = rememberLauncherForActivityResult(
@@ -90,6 +90,10 @@ fun JarvisApp(viewModel: JarvisViewModel) {
             context, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
         viewModel.setMicPermission(granted)
+    }
+
+    LaunchedEffect(ui.micPermissionGranted) {
+        if (ui.micPermissionGranted) ListeningService.start(context, ListeningService.ACTION_RESUME)
     }
 
     LifecycleResumeEffect(Unit) {
@@ -215,7 +219,7 @@ private fun JarvisHome(
             ) {
                 Text("STOP")
             }
-            MicButton(state = ui.state, onClick = onMicClick)
+            MicButton(state = ui.state, listening = ui.listening, onClick = onMicClick)
         }
     }
 }
@@ -272,7 +276,7 @@ private fun MessageBubble(message: ChatMessage) {
 }
 
 @Composable
-private fun MicButton(state: JarvisState, onClick: () -> Unit) {
+private fun MicButton(state: JarvisState, listening: Boolean, onClick: () -> Unit) {
     val accent = stateAccent(state)
     Button(
         onClick = onClick,
@@ -284,7 +288,7 @@ private fun MicButton(state: JarvisState, onClick: () -> Unit) {
         )
     ) {
         Text(
-            text = if (state == JarvisState.LISTENING) "STOP" else "MIC",
+            text = if (listening) "PAUSE" else "MIC",
             fontWeight = FontWeight.Bold
         )
     }
