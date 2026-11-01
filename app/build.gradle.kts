@@ -55,7 +55,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Stage 2: encrypted storage for the Gemini API key
-    implementation("androidx.security:security-crypto:1.0.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // Stage 5 (OCR): on-device text recognition for screen questions
     implementation("com.google.mlkit:text-recognition:16.0.1")
