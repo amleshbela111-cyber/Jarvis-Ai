@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Jarvis AI</string>
+    <string name="accessibility_description">Lets Jarvis tap, scroll, type, and read the screen, but only when you give a voice command. It does not record or watch your activity.</string>
+</resources>
