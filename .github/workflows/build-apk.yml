@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,7 +25,23 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
+      - name: Copy APK with a fixed name
+        run: cp app/build/outputs/apk/debug/app-debug.apk JarvisAI.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: JarvisAI-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: JarvisAI.apk
+
+      # Publishes the APK as a GitHub Release so Obtainium (or a browser) can download it directly.
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" JarvisAI.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Jarvis AI build ${{ github.run_number }}" \
+            --notes "Debug build from commit ${GITHUB_SHA::7}. Install with Obtainium or download JarvisAI.apk." \
+            --latest
