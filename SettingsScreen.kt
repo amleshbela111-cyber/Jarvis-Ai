@@ -1,0 +1,315 @@
+package com.jarvis.ai.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.jarvis.ai.model.SpeechLanguage
+import com.jarvis.ai.storage.ActivityLog
+import com.jarvis.ai.ui.theme.JarvisBackground
+import com.jarvis.ai.ui.theme.JarvisCyan
+import com.jarvis.ai.ui.theme.JarvisError
+import com.jarvis.ai.ui.theme.JarvisMuted
+import com.jarvis.ai.ui.theme.JarvisText
+import com.jarvis.ai.viewmodel.JarvisUiState
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+@Composable
+fun SettingsScreen(
+    ui: JarvisUiState,
+    onBack: () -> Unit,
+    onLanguageSelected: (SpeechLanguage) -> Unit,
+    onSpeakToggle: (Boolean) -> Unit,
+    onSaveKey: (String) -> Unit,
+    onClearKey: () -> Unit,
+    onSaveModel: (String) -> Unit,
+    onOpenWriteSettings: () -> Unit,
+    onEnableDeviceAdmin: () -> Unit,
+    onOpenAccessibility: () -> Unit,
+    onRequestScreenCapture: () -> Unit,
+    onStopScreenCapture: () -> Unit,
+    onAutomationToggle: (Boolean) -> Unit
+) {
+    var keyInput by remember { mutableStateOf("") }
+    var modelInput by remember { mutableStateOf(ui.geminiModel) }
+    val log by ActivityLog.entries.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) {
+                Text("BACK", color = JarvisMuted)
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "SETTINGS",
+                color = JarvisCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp
+            )
+        }
+
+        SectionTitle("Device permissions")
+        PermissionRow(
+            label = "Accessibility (tap, scroll, type, read screen)",
+            granted = ui.accessibilityOn,
+            actionLabel = "Open",
+            onAction = onOpenAccessibility
+        )
+        PermissionRow(
+            label = "Screen reading (answers about the screen)",
+            granted = ui.screenCaptureOn,
+            actionLabel = "Allow",
+            onAction = onRequestScreenCapture,
+            onRevoke = onStopScreenCapture
+        )
+        PermissionRow(
+            label = "Modify system settings (brightness)",
+            granted = ui.canWriteSettings,
+            actionLabel = "Open",
+            onAction = onOpenWriteSettings
+        )
+        PermissionRow(
+            label = "Device admin (screen lock)",
+            granted = ui.deviceAdminActive,
+            actionLabel = "Enable",
+            onAction = onEnableDeviceAdmin
+        )
+
+        SectionTitle("Automation")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Pause automation", color = JarvisText, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "Jarvis understands commands but runs no actions while paused. Resets when the app restarts.",
+                    color = JarvisMuted,
+                    fontSize = 13.sp
+                )
+            }
+            Switch(
+                checked = ui.automationPaused,
+                onCheckedChange = onAutomationToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = JarvisBackground,
+                    checkedTrackColor = JarvisError
+                )
+            )
+        }
+
+        SectionTitle("Activity log")
+        if (log.isEmpty()) {
+            Text(text = "No actions yet.", color = JarvisMuted, fontSize = 13.sp)
+        } else {
+            val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+            log.take(20).forEach { entry ->
+                Text(
+                    text = "${timeFormat.format(Date(entry.timeMillis))}  ${entry.action}  " +
+                        "${if (entry.success) "OK" else "FAILED"}: ${entry.message}",
+                    color = if (entry.success) JarvisText else JarvisMuted,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        SectionTitle("Gemini brain")
+        Text(
+            text = if (ui.geminiKeySaved) "API key: saved (encrypted on this phone)" else "API key: not set",
+            color = if (ui.geminiKeySaved) JarvisCyan else JarvisMuted,
+            fontSize = 13.sp
+        )
+        OutlinedTextField(
+            value = keyInput,
+            onValueChange = { keyInput = it },
+            label = { Text("Gemini API key") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            colors = jarvisFieldColors(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    onSaveKey(keyInput)
+                    keyInput = ""
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
+            ) {
+                Text("Save key")
+            }
+            OutlinedButton(
+                onClick = onClearKey,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError)
+            ) {
+                Text("Remove key")
+            }
+        }
+
+        OutlinedTextField(
+            value = modelInput,
+            onValueChange = { modelInput = it },
+            label = { Text("Gemini model") },
+            singleLine = true,
+            colors = jarvisFieldColors(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(
+            onClick = { onSaveModel(modelInput) },
+            colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
+        ) {
+            Text("Save model")
+        }
+
+        if (ui.settingsMessage.isNotBlank()) {
+            Text(text = ui.settingsMessage, color = JarvisText, fontSize = 13.sp)
+        }
+
+        SectionTitle("Speech")
+        Text(text = "Speech language", color = JarvisText, fontWeight = FontWeight.SemiBold)
+        SpeechLanguage.values().forEach { language ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = ui.language == language,
+                        onClick = { onLanguageSelected(language) },
+                        role = Role.RadioButton
+                    )
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = ui.language == language,
+                    onClick = null,
+                    colors = RadioButtonDefaults.colors(selectedColor = JarvisCyan)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(text = language.label, color = JarvisText)
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(text = "Speak responses", color = JarvisText, fontWeight = FontWeight.SemiBold)
+                Text(text = "Jarvis reads replies aloud", color = JarvisMuted, fontSize = 13.sp)
+            }
+            Switch(
+                checked = ui.speakResponses,
+                onCheckedChange = onSpeakToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = JarvisBackground,
+                    checkedTrackColor = JarvisCyan
+                )
+            )
+        }
+
+        SectionTitle("Background use")
+        Text(
+            text = "Android stops microphone listening when the app is not on screen. Voice commands work while Jarvis is open. " +
+                "To keep Jarvis alive longer, turn off battery optimization for Jarvis AI in Android Settings. Some phone makers still close background apps.",
+            color = JarvisMuted,
+            fontSize = 13.sp
+        )
+    }
+}
+
+@Composable
+private fun PermissionRow(
+    label: String,
+    granted: Boolean,
+    actionLabel: String,
+    onAction: () -> Unit,
+    onRevoke: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = label, color = JarvisText)
+            Text(
+                text = if (granted) "Granted" else "Not granted",
+                color = if (granted) JarvisCyan else JarvisMuted,
+                fontSize = 13.sp
+            )
+        }
+        if (!granted) {
+            Button(
+                onClick = onAction,
+                colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
+            ) {
+                Text(actionLabel)
+            }
+        } else if (onRevoke != null) {
+            OutlinedButton(
+                onClick = onRevoke,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError)
+            ) {
+                Text("Stop")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text = text.uppercase(), color = JarvisCyan, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+}
+
+@Composable
+private fun jarvisFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = JarvisText,
+    unfocusedTextColor = JarvisText,
+    focusedBorderColor = JarvisCyan,
+    unfocusedBorderColor = JarvisMuted,
+    cursorColor = JarvisCyan,
+    focusedLabelColor = JarvisCyan,
+    unfocusedLabelColor = JarvisMuted
+)
