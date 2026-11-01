@@ -1,6 +1,8 @@
 package com.jarvis.ai.viewmodel
 
 import android.app.Application
+import android.content.Intent
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jarvis.ai.core.JarvisCore
@@ -176,4 +178,24 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     fun requestDeviceAdmin() = JarvisCore.device().requestDeviceAdmin()
 
     fun openAccessibilitySettings() = JarvisCore.accessibility().openSettings()
+
+    /** Opens the battery optimization page so background listening is not stopped. */
+    fun openBatterySettings() {
+        runCatching {
+            app.startActivity(
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+
+    /** Opens this app's notification settings. */
+    fun openNotificationSettings() {
+        runCatching {
+            app.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
 }

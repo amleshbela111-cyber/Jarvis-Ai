@@ -68,6 +68,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showSetup by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -102,7 +103,22 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     }
 
     Box(Modifier.fillMaxSize().background(JarvisBackground)) {
-        if (showSettings) {
+        if (showSetup) {
+            SetupScreen(
+                ui = ui,
+                onBack = { showSetup = false },
+                onOpenAccessibility = viewModel::openAccessibilitySettings,
+                onOpenWriteSettings = viewModel::openWriteSettingsScreen,
+                onEnableDeviceAdmin = viewModel::requestDeviceAdmin,
+                onRequestScreenCapture = {
+                    val mpm = context.getSystemService(MediaProjectionManager::class.java)
+                    projectionLauncher.launch(mpm.createScreenCaptureIntent())
+                },
+                onOpenBattery = viewModel::openBatterySettings,
+                onOpenNotifications = viewModel::openNotificationSettings,
+                onOpenMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+            )
+        } else if (showSettings) {
             SettingsScreen(
                 ui = ui,
                 onBack = { showSettings = false },
@@ -125,6 +141,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
             JarvisHome(
                 ui = ui,
                 onOpenSettings = { showSettings = true },
+                onOpenSetup = { showSetup = true },
                 onMicClick = {
                     if (ui.micPermissionGranted) {
                         viewModel.onMicButton()
@@ -142,6 +159,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
 private fun JarvisHome(
     ui: JarvisUiState,
     onOpenSettings: () -> Unit,
+    onOpenSetup: () -> Unit,
     onMicClick: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -167,6 +185,9 @@ private fun JarvisHome(
                 fontWeight = FontWeight.Bold,
                 fontSize = 22.sp
             )
+            TextButton(onClick = onOpenSetup) {
+                Text("SETUP", color = JarvisMuted)
+            }
             TextButton(onClick = onOpenSettings) {
                 Text("SETTINGS", color = JarvisMuted)
             }
