@@ -99,8 +99,21 @@ class VoiceController(
         recognizer?.stopListening()
     }
 
-    /** Speaks [text]. Returns false if TTS is not ready, so the caller can recover. */
+    /** Speaks [text] with the natural Gemini voice, or the phone's voice if that is unavailable. */
     fun speak(text: String): Boolean {
+        if (NaturalVoice.canUse()) {
+            NaturalVoice.speak(
+                text,
+                onStart = { mainHandler.post { listener.onSpeechStarted() } },
+                onDone = { mainHandler.post { listener.onSpeechFinished() } },
+                onFail = { mainHandler.post { speakWithPhoneVoice(text) } }
+            )
+            return true
+        }
+        return speakWithPhoneVoice(text)
+    }
+
+    private fun speakWithPhoneVoice(text: String): Boolean {
         val engine = tts ?: return false
         if (!ttsReady) return false
         val utteranceId = "jarvis-${System.nanoTime()}"
@@ -108,10 +121,12 @@ class VoiceController(
     }
 
     fun stopSpeaking() {
+        NaturalVoice.stop()
         tts?.stop()
     }
 
     fun release() {
+        NaturalVoice.stop()
         recognizer?.destroy()
         recognizer = null
         tts?.stop()

@@ -12,8 +12,8 @@ android {
         applicationId = "com.jarvis.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.9.0-shizuku-voice"
+        versionCode = 11
+        versionName = "1.1.0-answers-in-app"
     }
 
     buildTypes {
@@ -36,6 +36,7 @@ android {
 
     buildFeatures {
         compose = true
+        aidl = true
     }
 }
 

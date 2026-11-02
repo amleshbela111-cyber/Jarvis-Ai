@@ -25,12 +25,12 @@ class GeminiClient {
         expectJson: Boolean = true
     ): String = withContext(Dispatchers.IO) {
         try {
-            callOnce(apiKey, model, systemPrompt, userPrompt, imageBase64, expectJson)
+            callOnce(apiKey, model, systemPrompt, userPrompt, imageBase64, expectJson, PRIMARY_READ_MS)
         } catch (e: IOException) {
             // Only retry on network timeouts, not on errors such as a retired model (404) or bad key.
             val retryable = e is java.net.SocketTimeoutException || e is java.net.ConnectException
             if (model == FALLBACK_MODEL || !retryable) throw e
-            callOnce(apiKey, FALLBACK_MODEL, systemPrompt, userPrompt, imageBase64, expectJson)
+            callOnce(apiKey, FALLBACK_MODEL, systemPrompt, userPrompt, imageBase64, expectJson, FALLBACK_READ_MS)
         }
     }
 
@@ -40,12 +40,13 @@ class GeminiClient {
         systemPrompt: String,
         userPrompt: String,
         imageBase64: String?,
-        expectJson: Boolean
+        expectJson: Boolean,
+        readTimeoutMs: Int
     ): String {
         val connection = (URL("$BASE_URL/$model:generateContent").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
+            readTimeout = readTimeoutMs
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("x-goog-api-key", apiKey)
@@ -122,8 +123,9 @@ class GeminiClient {
     private companion object {
         const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
         const val FALLBACK_MODEL = "gemini-3.6-flash"
-        const val CONNECT_TIMEOUT_MS = 10_000
-        const val READ_TIMEOUT_MS = 20_000
+        const val CONNECT_TIMEOUT_MS = 8_000
+        const val PRIMARY_READ_MS = 12_000
+        const val FALLBACK_READ_MS = 12_000
         const val MAX_OUTPUT_TOKENS = 2048
     }
 }

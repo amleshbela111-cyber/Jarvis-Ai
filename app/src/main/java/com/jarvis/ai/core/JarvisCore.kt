@@ -1,7 +1,9 @@
 package com.jarvis.ai.core
 
+import kotlinx.coroutines.withTimeoutOrNull
 import android.content.Context
 import com.jarvis.ai.accessibility.AccessibilityActions
+import com.jarvis.ai.voice.NaturalVoice
 import com.jarvis.ai.ai.ActionExecutor
 import com.jarvis.ai.ai.GeminiClient
 import com.jarvis.ai.ai.JarvisPlanner
@@ -66,6 +68,8 @@ object JarvisCore {
     private var nextId = 1L
     private var deps: Deps? = null
 
+    private val PLAN_TIMEOUT_MS = 28_000L
+
     private val yes = Regex("\\b(haan|haa|ha|yes|ok|theek hai|confirm|kar do)\\b", RegexOption.IGNORE_CASE)
     private val no = Regex("\\b(nahi|nahin|no|cancel|rehne do|ruko)\\b", RegexOption.IGNORE_CASE)
 
@@ -75,6 +79,7 @@ object JarvisCore {
         val app = context.applicationContext
         val settings = JarvisSettings(app)
         val keys = ApiKeyStore(app)
+        NaturalVoice.apiKeyProvider = { keys.load() }
         val gemini = GeminiClient()
         val device = DeviceController(app)
         val accessibility = AccessibilityActions(app)
@@ -90,13 +95,33 @@ object JarvisCore {
     fun device(): DeviceController = requireDeps().device
     fun accessibility(): AccessibilityActions = requireDeps().accessibility
 
+    /** Turns any technical error into a short, clear message. Raw error text is never shown. */
+    private fun friendlyError(error: Throwable): String {
+        val text = (error.message ?: "").lowercase()
+        return when {
+            error is java.net.SocketTimeoutException || "timeout" in text || "timed out" in text ->
+                "Jawab mein thoda time lag gaya. Ek baar phir bolein."
+            "404" in text || "no longer available" in text ->
+                "Gemini model update hona chahiye. Settings mein model check karein."
+            "400" in text || "401" in text || "403" in text || "api key" in text ->
+                "API key galat lag rahi hai. Settings mein jaakar check karein."
+            else -> "Abhi jawab nahi mil paya. Ek baar phir bolein."
+        }
+    }
+
     private fun requireDeps(): Deps = deps ?: throw IllegalStateException("JarvisCore.init was not called")
 
     /** Runs one command in the background. [onReply] is always called, even with an empty or error reply. */
     fun submit(text: String, onReply: (String) -> Unit) {
         job?.cancel()
         job = scope.launch {
-            val reply = handle(text)
+            val reply = try {
+                handle(text)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                friendlyError(e)
+            }
             onReply(reply)
         }
     }
@@ -171,9 +196,17 @@ object JarvisCore {
             .takeLast(2)
             .map { "${if (it.sender == Sender.USER) "User" else "Jarvis"}: ${it.text}" }
 
-        val plan = d.planner.plan(apiKey, d.settings.geminiModel, command, history).getOrElse { error ->
+        // A hard limit on the whole thinking step, so the user never waits forever.
+        val planResult = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
+            d.planner.plan(apiKey, d.settings.geminiModel, command, history)
+        }
+        if (planResult == null) {
+            ActivityLog.add(command, "plan", false, "Time limit reached.")
+            return "Abhi jawab mein thoda time lag raha hai. Ek baar phir bolein."
+        }
+        val plan = planResult.getOrElse { error ->
             ActivityLog.add(command, "plan", false, error.message ?: "unknown error")
-            return "Brain se jawab nahi mila: ${error.message ?: "unknown error"}"
+            return friendlyError(error)
         }
         return runPlan(d, command, plan, confirmed = false)
     }
