@@ -38,6 +38,27 @@ class JarvisSettings(context: Context) {
             prefs.edit().putString(KEY_GEMINI_MODEL, value).apply()
         }
 
+    /** "short" (1-2 sentences) or "detailed" (up to 5 sentences). */
+    var replyStyle: String
+        get() = prefs.getString(KEY_REPLY_STYLE, "short") ?: "short"
+        set(value) {
+            prefs.edit().putString(KEY_REPLY_STYLE, value).apply()
+        }
+
+    /** "slow", "normal", or "fast". Applies to the phone's voice. */
+    var voiceSpeed: String
+        get() = prefs.getString(KEY_VOICE_SPEED, "normal") ?: "normal"
+        set(value) {
+            prefs.edit().putString(KEY_VOICE_SPEED, value).apply()
+        }
+
+    /** True keeps the microphone's start and stop beep silent. */
+    var muteBeep: Boolean
+        get() = prefs.getBoolean(KEY_MUTE_BEEP, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_MUTE_BEEP, value).apply()
+        }
+
     companion object {
         const val DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
@@ -45,5 +66,8 @@ class JarvisSettings(context: Context) {
         private const val KEY_LANGUAGE = "speech_language"
         private const val KEY_SPEAK_RESPONSES = "speak_responses"
         private const val KEY_GEMINI_MODEL = "gemini_model"
+        private const val KEY_REPLY_STYLE = "reply_style"
+        private const val KEY_VOICE_SPEED = "voice_speed"
+        private const val KEY_MUTE_BEEP = "mute_beep"
     }
 }

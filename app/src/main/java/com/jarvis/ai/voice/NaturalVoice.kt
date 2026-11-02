@@ -26,13 +26,19 @@ object NaturalVoice {
     @Volatile
     var apiKeyProvider: (() -> String?)? = null
 
-    private const val MODEL = "gemini-3.8-flash-tts"
+    /** Tried in order. The first one that works is used. */
+    private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts")
     private const val VOICE = "Kore"
     private const val SAMPLE_RATE = 24000
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
     private var track: AudioTrack? = null
+
+    /** Why the last natural-voice attempt failed. Shown on screen. */
+    @Volatile
+    var lastError: String = ""
+        private set
 
     fun canUse(): Boolean = apiKeyProvider?.invoke()?.isNotBlank() == true
 
@@ -46,13 +52,14 @@ object NaturalVoice {
         stop()
         job = scope.launch {
             try {
-                val pcm = synthesize(key, text)
+                val pcm = synthesizeWithFallback(key, text)
                 onStart()
                 play(pcm)
                 onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                lastError = e.message ?: "unknown"
                 onFail()
             }
         }
@@ -68,7 +75,19 @@ object NaturalVoice {
         track = null
     }
 
-    private fun synthesize(apiKey: String, text: String): ByteArray {
+    private fun synthesizeWithFallback(apiKey: String, text: String): ByteArray {
+        var failure: Exception? = null
+        for (model in MODELS) {
+            try {
+                return synthesize(apiKey, text, model)
+            } catch (e: Exception) {
+                failure = e
+            }
+        }
+        throw failure ?: IllegalStateException("no TTS model")
+    }
+
+    private fun synthesize(apiKey: String, text: String, model: String): ByteArray {
         val body = JSONObject()
             .put(
                 "contents",
@@ -86,7 +105,7 @@ object NaturalVoice {
                         )
                     )
             )
-        val connection = (URL("https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent")
+        val connection = (URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
             .openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000

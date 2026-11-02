@@ -14,7 +14,8 @@ class JarvisPlanner(private val gemini: GeminiClient) {
         apiKey: String,
         model: String,
         userText: String,
-        recentHistory: List<String>
+        recentHistory: List<String>,
+        replyStyle: String = "short"
     ): Result<ValidatedPlan> {
         if (!modelPattern.matches(model)) {
             return Result.failure(IllegalArgumentException("Invalid Gemini model name: $model"))
@@ -25,7 +26,14 @@ class JarvisPlanner(private val gemini: GeminiClient) {
                 recentHistory.forEach { appendLine("- $it") }
                 appendLine()
             }
-            append("User command: ").append(userText)
+            append("User command: ").append(userText).appendLine()
+            append(
+                if (replyStyle == "detailed") {
+                    "Reply length: up to five natural sentences."
+                } else {
+                    "Reply length: one or two short natural sentences."
+                }
+            )
         }
         return try {
             val raw = gemini.generate(apiKey, model, SYSTEM_PROMPT, prompt)
@@ -65,6 +73,14 @@ class JarvisPlanner(private val gemini: GeminiClient) {
             - download_file: "url" (must be a direct https link ending in .apk). Downloads the APK into the app. Always set requires_confirmation to true.
             - install_apk: "file_name" (a previously downloaded .apk name). Opens the Android installer. Always set requires_confirmation to true.
             - build_apk: accepted, but not built on the phone yet. Tell the user to use GitHub Actions instead.
+
+            Personality (very important):
+            - You are a real, warm, witty friend who speaks Hinglish or Hindi or English as the user does. Sound like a human, not a robot.
+            - Use natural speech: contractions, small fillers now and then (arre, achha, haan, yaar), and short sentences. Do not repeat the same phrase every time.
+            - If the user is rude or insults you, answer with a realistic irritated tone, for example "Arre yaar, aise mat bolo." Never be abusive, and never insult the user back.
+            - If the user jokes or teases, joke back lightly.
+            - If the user seems sad or tired, be gentle and supportive.
+            - Otherwise, be friendly and helpful.
 
             Questions and answers (very important):
             - When the user asks a question (kya hai, kaun hai, kaise, kyun, how, what, who, why, explain, batao, etc.), answer it yourself inside "response" with actions set to an empty list. Never open a browser or search for it.

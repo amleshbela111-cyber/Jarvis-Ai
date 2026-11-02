@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The shared brain. The UI and the background listening service both use this object,
@@ -100,6 +101,18 @@ object JarvisCore {
             app, device, accessibility, screen, ProjectWorkspace(app), ApkInstaller(app)
         )
         deps = Deps(settings, keys, device, accessibility, JarvisPlanner(gemini), executor)
+
+        // Warm up the connection to Gemini in the background, so the first real question is faster.
+        val key = keys.load()
+        if (!key.isNullOrBlank()) {
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        gemini.generate(key, settings.geminiModel, "Reply with OK.", "ping", null, false)
+                    }
+                }
+            }
+        }
     }
 
     fun settings(): JarvisSettings = requireDeps().settings
@@ -197,6 +210,7 @@ object JarvisCore {
             com.jarvis.ai.update.UpdateFlow.draft.value = command
             return "Prompt taiyar hai. Screen par CLAUDE button dabaiye."
         }
+        SettingsCommands.match(command, d.settings)?.let { return it }
         if (UPDATE_TRIGGER.containsMatchIn(command)) {
             com.jarvis.ai.update.UpdateFlow.promptMode = true
             return "Theek hai, ab apna prompt bolein."
@@ -221,7 +235,7 @@ object JarvisCore {
 
         // A hard limit on the whole thinking step, so the user never waits forever.
         val planResult = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
-            d.planner.plan(apiKey, d.settings.geminiModel, command, history)
+            d.planner.plan(apiKey, d.settings.geminiModel, command, history, d.settings.replyStyle)
         }
         if (planResult == null) {
             ActivityLog.add(command, "plan", false, "Time limit reached.")

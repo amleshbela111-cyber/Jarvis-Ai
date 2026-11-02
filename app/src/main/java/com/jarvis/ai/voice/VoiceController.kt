@@ -11,6 +11,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.jarvis.ai.core.JarvisCore
 import com.jarvis.ai.model.SpeechLanguage
 import java.util.Locale
 
@@ -106,12 +107,18 @@ class VoiceController(
 
     /** Speaks [text] with the natural Gemini voice, or the phone's voice if that is unavailable. */
     fun speak(text: String): Boolean {
-        if (NaturalVoice.canUse()) {
+        // Short replies use the phone's voice at once. Longer ones use the natural voice.
+        if (NaturalVoice.canUse() && text.length > SHORT_REPLY_CHARS) {
             NaturalVoice.speak(
                 text,
                 onStart = { mainHandler.post { listener.onSpeechStarted() } },
                 onDone = { mainHandler.post { listener.onSpeechFinished() } },
-                onFail = { mainHandler.post { speakWithPhoneVoice(text) } }
+                onFail = {
+                    mainHandler.post {
+                        listener.onVoiceError("Gemini awaaz nahi mili (${NaturalVoice.lastError.take(80)}). Phone ki awaaz use ki.")
+                        speakWithPhoneVoice(text)
+                    }
+                }
             )
             return true
         }
@@ -149,7 +156,13 @@ class VoiceController(
             engine.setLanguage(Locale.US)
         }
         // A slightly slower pace and lower pitch sound more like a calm person speaking.
-        engine.setSpeechRate(0.95f)
+        engine.setSpeechRate(
+            when (runCatching { JarvisCore.settings().voiceSpeed }.getOrDefault("normal")) {
+                "slow" -> 0.8f
+                "fast" -> 1.1f
+                else -> 0.95f
+            }
+        )
         engine.setPitch(0.95f)
         pickBestVoice(engine, locale)
     }
@@ -166,6 +179,8 @@ class VoiceController(
 
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {
+            mainHandler.removeCallbacks(unmuteBeep)
+            mainHandler.postDelayed(unmuteBeep, POST_READY_UNMUTE_MS)
             listener.onListeningStarted()
         }
 
@@ -229,26 +244,38 @@ class VoiceController(
         else -> "Speech recognition error (code $error)."
     }
 
-    /** Mutes the system beep for a moment, so the recognizer's start and stop sounds do not play. */
+    /** Mutes the beep streams from the moment listening starts until shortly after it is ready. */
     private fun muteBeepBriefly() {
+        if (!runCatching { JarvisCore.settings().muteBeep }.getOrDefault(true)) return
         setBeepMuted(true)
         mainHandler.removeCallbacks(unmuteBeep)
         mainHandler.postDelayed(unmuteBeep, BEEP_MUTE_MS)
     }
 
+    private val beepStreams = intArrayOf(
+        AudioManager.STREAM_SYSTEM,
+        AudioManager.STREAM_NOTIFICATION,
+        AudioManager.STREAM_RING
+    )
+    private val mutedByUs = mutableSetOf<Int>()
+
     private fun setBeepMuted(muted: Boolean) {
         runCatching {
-            if (muted && !beepMuted && !audioManager.isStreamMute(AudioManager.STREAM_SYSTEM)) {
-                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
-                beepMuted = true
-            } else if (!muted && beepMuted) {
-                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
-                beepMuted = false
+            for (stream in beepStreams) {
+                if (muted && !mutedByUs.contains(stream) && !audioManager.isStreamMute(stream)) {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, 0)
+                    mutedByUs.add(stream)
+                } else if (!muted && mutedByUs.remove(stream)) {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, 0)
+                }
             }
         }
+        beepMuted = muted
     }
 
     private companion object {
-        const val BEEP_MUTE_MS = 900L
+        const val BEEP_MUTE_MS = 1500L
+        const val POST_READY_UNMUTE_MS = 300L
+        const val SHORT_REPLY_CHARS = 90
     }
 }
