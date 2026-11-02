@@ -124,3 +124,4 @@ Rules:
 - Do not write .github/ files; they are added automatically.
 """
 }
+}
