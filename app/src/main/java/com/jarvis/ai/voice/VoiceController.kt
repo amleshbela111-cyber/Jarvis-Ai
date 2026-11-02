@@ -2,6 +2,7 @@ package com.jarvis.ai.voice
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -37,6 +38,9 @@ class VoiceController(
 
     private val appContext = context.applicationContext
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val audioManager = appContext.getSystemService(AudioManager::class.java)
+    private var beepMuted = false
+    private val unmuteBeep = Runnable { setBeepMuted(false) }
 
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
@@ -92,6 +96,7 @@ class VoiceController(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
         }
+        muteBeepBriefly()
         rec.startListening(intent)
     }
 
@@ -127,6 +132,7 @@ class VoiceController(
 
     fun release() {
         NaturalVoice.stop()
+        setBeepMuted(false)
         recognizer?.destroy()
         recognizer = null
         tts?.stop()
@@ -177,6 +183,7 @@ class VoiceController(
         }
 
         override fun onEndOfSpeech() {
+            muteBeepBriefly()
             listener.onListeningStopped()
         }
 
@@ -220,5 +227,28 @@ class VoiceController(
         SpeechRecognizer.ERROR_AUDIO -> "Microphone audio error."
         SpeechRecognizer.ERROR_CLIENT -> "Speech client error."
         else -> "Speech recognition error (code $error)."
+    }
+
+    /** Mutes the system beep for a moment, so the recognizer's start and stop sounds do not play. */
+    private fun muteBeepBriefly() {
+        setBeepMuted(true)
+        mainHandler.removeCallbacks(unmuteBeep)
+        mainHandler.postDelayed(unmuteBeep, BEEP_MUTE_MS)
+    }
+
+    private fun setBeepMuted(muted: Boolean) {
+        runCatching {
+            if (muted && !beepMuted && !audioManager.isStreamMute(AudioManager.STREAM_SYSTEM)) {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
+                beepMuted = true
+            } else if (!muted && beepMuted) {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                beepMuted = false
+            }
+        }
+    }
+
+    private companion object {
+        const val BEEP_MUTE_MS = 900L
     }
 }

@@ -228,6 +228,8 @@ private fun JarvisHome(
             }
         }
 
+        UpdatePanel()
+
         Spacer(Modifier.height(12.dp))
 
         Row(

@@ -66,9 +66,21 @@ object JarvisCore {
     private var job: Job? = null
     private var pending: Pending? = null
     private var nextId = 1L
+    private var silentControl = false
     private var deps: Deps? = null
 
     private val PLAN_TIMEOUT_MS = 28_000L
+
+    private val SCREEN_CONTROL = setOf(
+        com.jarvis.ai.ai.ActionType.TAP,
+        com.jarvis.ai.ai.ActionType.SCROLL,
+        com.jarvis.ai.ai.ActionType.SWIPE,
+        com.jarvis.ai.ai.ActionType.INPUT_TEXT,
+        com.jarvis.ai.ai.ActionType.NAVIGATE_BACK,
+        com.jarvis.ai.ai.ActionType.GO_HOME
+    )
+
+    private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
     private val yes = Regex("\\b(haan|haa|ha|yes|ok|theek hai|confirm|kar do)\\b", RegexOption.IGNORE_CASE)
     private val no = Regex("\\b(nahi|nahin|no|cancel|rehne do|ruko)\\b", RegexOption.IGNORE_CASE)
@@ -112,9 +124,10 @@ object JarvisCore {
     private fun requireDeps(): Deps = deps ?: throw IllegalStateException("JarvisCore.init was not called")
 
     /** Runs one command in the background. [onReply] is always called, even with an empty or error reply. */
-    fun submit(text: String, onReply: (String) -> Unit) {
+    fun submit(text: String, onReply: (String, Boolean) -> Unit) {
         job?.cancel()
         job = scope.launch {
+            silentControl = false
             val reply = try {
                 handle(text)
             } catch (e: CancellationException) {
@@ -122,7 +135,7 @@ object JarvisCore {
             } catch (e: Exception) {
                 friendlyError(e)
             }
-            onReply(reply)
+            onReply(reply, !silentControl)
         }
     }
 
@@ -179,6 +192,16 @@ object JarvisCore {
     private suspend fun process(command: String): String {
         val d = requireDeps()
 
+        if (com.jarvis.ai.update.UpdateFlow.promptMode) {
+            com.jarvis.ai.update.UpdateFlow.promptMode = false
+            com.jarvis.ai.update.UpdateFlow.draft.value = command
+            return "Prompt taiyar hai. Screen par CLAUDE button dabaiye."
+        }
+        if (UPDATE_TRIGGER.containsMatchIn(command)) {
+            com.jarvis.ai.update.UpdateFlow.promptMode = true
+            return "Theek hai, ab apna prompt bolein."
+        }
+
         pending?.let { p ->
             pending = null
             if (no.containsMatchIn(command)) {
@@ -227,19 +250,24 @@ object JarvisCore {
 
         // Only confirmed outcomes are reported, so Jarvis never claims an action worked when it did not.
         val results = mutableListOf<String>()
+        // Screen controls (tap, swipe, scroll, back, home, typing) run silently. Jarvis only shows the text.
+        silentControl = plan.actions.isNotEmpty()
         for (action in plan.actions) {
             when (action) {
                 is ValidatedAction.Ready -> {
                     val outcome = d.executor.execute(action)
                     ActivityLog.add(command, action.type.wire, outcome.success, outcome.message)
+                    if (!outcome.success || action.type !in SCREEN_CONTROL) silentControl = false
                     results += outcome.message
                 }
                 is ValidatedAction.Pending -> {
                     ActivityLog.add(command, action.type.wire, false, "Not built yet.")
+                    silentControl = false
                     results += "${action.type.wire} abhi supported nahi hai."
                 }
                 is ValidatedAction.Rejected -> {
                     ActivityLog.add(command, action.rawType, false, action.reason)
+                    silentControl = false
                     results += "Action rejected: ${action.reason}."
                 }
             }

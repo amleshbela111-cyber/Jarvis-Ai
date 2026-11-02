@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -96,4 +97,8 @@
 
     </application>
 
+    <queries>
+        <package android:name="com.anthropic.claude" />
+        <package android:name="com.termux" />
+    </queries>
 </manifest>

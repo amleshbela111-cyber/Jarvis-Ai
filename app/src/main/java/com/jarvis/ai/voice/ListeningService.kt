@@ -94,10 +94,10 @@ class ListeningService : Service(), VoiceController.Listener {
         handler.postDelayed(restartRunnable, delayMs)
     }
 
-    private fun speakReply(reply: String) {
+    private fun speakReply(reply: String, speak: Boolean = true) {
         busy = true
         val speakOn = JarvisCore.settings().speakResponses
-        if (speakOn && voice.speak(reply)) {
+        if (speak && speakOn && voice.speak(reply)) {
             // onSpeechStarted and onSpeechFinished continue the loop from here.
             return
         }
@@ -125,7 +125,7 @@ class ListeningService : Service(), VoiceController.Listener {
         sessionActive = false
         JarvisCore.setPartial("")
         busy = true
-        JarvisCore.submit(text) { reply -> speakReply(reply) }
+        JarvisCore.submit(text) { reply, speak -> speakReply(reply, speak) }
     }
 
     override fun onListeningStopped() {
