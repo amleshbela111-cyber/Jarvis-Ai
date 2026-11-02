@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import com.jarvis.ai.device.Outcome
+import com.jarvis.ai.screen.TextFinder
 import com.jarvis.ai.shizuku.ShizukuBridge
 import com.jarvis.ai.shizuku.ShizukuShell
 import kotlinx.coroutines.delay
@@ -126,6 +127,12 @@ class AccessibilityActions(private val context: Context) {
                 return Outcome(true, "Clicked \"$label\".")
             }
             if (attempt < TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
+        }
+        // Small text that the accessibility tree does not list (games, icons, custom views): look for it on the screenshot.
+        val (width, _) = screenSize()
+        val point = TextFinder.findCenter(label, width)
+        if (point != null && ShizukuShell.run("input tap ${point.first} ${point.second}") != null) {
+            return Outcome(true, "Clicked \"$label\".")
         }
         return Outcome(false, "Could not find a clickable \"$label\" on screen. Screen par wo item dikh raha hai ya nahi, check karein.")
     }

@@ -38,6 +38,9 @@ class ListeningService : Service(), VoiceController.Listener {
 
     private val restartRunnable = Runnable { beginListening() }
 
+    /** Until this time (ms), Jarvis is awake and takes commands without "Hey Jarvis". */
+    private var awakeUntil = 0L
+
     override fun onCreate() {
         super.onCreate()
         JarvisCore.init(this)
@@ -96,6 +99,7 @@ class ListeningService : Service(), VoiceController.Listener {
 
     private fun speakReply(reply: String, speak: Boolean = true) {
         busy = true
+        awakeUntil = System.currentTimeMillis() + AWAKE_MS
         val speakOn = JarvisCore.settings().speakResponses
         if (speak && speakOn && voice.speak(reply)) {
             // onSpeechStarted and onSpeechFinished continue the loop from here.
@@ -124,8 +128,49 @@ class ListeningService : Service(), VoiceController.Listener {
     override fun onFinalResult(text: String) {
         sessionActive = false
         JarvisCore.setPartial("")
+        val heard = text.trim()
+
+        if (CLOSE_TRIGGER.containsMatchIn(heard)) {
+            closeJarvis()
+            return
+        }
+
+        val awake = System.currentTimeMillis() < awakeUntil
+        val command = if (awake) {
+            heard
+        } else {
+            // Asleep: only "Hey Jarvis" starts a command. Anything else is ignored.
+            val wake = WAKE_TRIGGER.find(heard)
+            if (wake == null) {
+                JarvisCore.setVoiceState(JarvisState.IDLE, "\"Hey Jarvis\" bolein...")
+                scheduleRestart(RESTART_DELAY_MS)
+                return
+            }
+            heard.substring(wake.range.last + 1).trim()
+        }
+
         busy = true
-        JarvisCore.submit(text) { reply, speak -> speakReply(reply, speak) }
+        if (command.isBlank()) {
+            // Only the wake word was said: acknowledge, then wait for the command.
+            speakReply("Haan, bolein.")
+            return
+        }
+        JarvisCore.submit(command) { reply, speak -> speakReply(reply, speak) }
+    }
+
+    /** "Close Jarvis": stops listening, closes the app screen, and ends this service. */
+    private fun closeJarvis() {
+        handler.removeCallbacksAndMessages(null)
+        busy = false
+        sessionActive = false
+        awakeUntil = 0L
+        voice.stopListening()
+        voice.stopSpeaking()
+        JarvisCore.cancelCurrent()
+        JarvisCore.setListening(false)
+        JarvisCore.setVoiceState(JarvisState.IDLE, "Jarvis band ho gaya.")
+        JarvisCore.closeApp()
+        stopSelf()
     }
 
     override fun onListeningStopped() {
@@ -147,6 +192,7 @@ class ListeningService : Service(), VoiceController.Listener {
 
     override fun onSpeechFinished() {
         busy = false
+        awakeUntil = System.currentTimeMillis() + AWAKE_MS
         JarvisCore.setVoiceState(JarvisState.IDLE, "Sun raha hoon...")
         scheduleRestart(RESTART_DELAY_MS)
     }
@@ -198,6 +244,19 @@ class ListeningService : Service(), VoiceController.Listener {
         private const val CHANNEL_ID = "jarvis_listening"
         private const val NOTIFICATION_ID = 42
         private const val RESTART_DELAY_MS = 500L
+
+        /** How long Jarvis stays awake after a reply, so follow-up questions need no wake word. */
+        private const val AWAKE_MS = 20_000L
+
+        private val WAKE_TRIGGER = Regex(
+            "(hey|hi|he|हे|हाय)\\s*,?\\s*(jarvis|jarwis|jarvish|javis|जार्विस|जारविस|जार्वीस)",
+            RegexOption.IGNORE_CASE
+        )
+        private val CLOSE_TRIGGER = Regex(
+            "(close|band|bund|exit|बंद)\\s*(karo|kar do|करो)?\\s*(jarvis|jarwis|जार्विस|जारविस)" +
+                "|(jarvis|jarwis|जार्विस|जारविस)\\s*(close|band|bund|बंद)",
+            RegexOption.IGNORE_CASE
+        )
 
         /** Starts the service if needed and sends it [action]. Call only while the app is in the foreground. */
         fun start(context: Context, action: String) {

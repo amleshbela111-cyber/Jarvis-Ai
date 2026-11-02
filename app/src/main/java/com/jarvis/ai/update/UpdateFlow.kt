@@ -19,6 +19,9 @@ object UpdateFlow {
     /** True after "update Jarvis" is said, so the next sentence becomes the prompt. */
     var promptMode = false
 
+    /** True only after "update Jarvis" is said, so the Claude / Termux / GitHub box stays hidden otherwise. */
+    val panelVisible = MutableStateFlow(false)
+
     private const val CLAUDE_PACKAGE = "com.anthropic.claude"
     private const val TERMUX_PACKAGE = "com.termux"
     private const val CLAUDE_FALLBACK = "https://claude.ai/new"

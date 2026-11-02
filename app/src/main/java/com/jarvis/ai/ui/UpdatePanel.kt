@@ -11,6 +11,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,14 +43,21 @@ fun UpdatePanel() {
 
     LaunchedEffect(draft) { text = draft }
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        val clip = UpdateFlow.clipboardText(context)
-        if (clip != null && clip.trimStart().startsWith("set -e") && text.isBlank()) {
+    // Fills the box with a Termux command from the clipboard, when one is there and the box is empty.
+    fun fillFromClipboard() {
+        val clip = UpdateFlow.clipboardText(context) ?: return
+        val looksLikeTermux = clip.trimStart().startsWith("set -e") ||
+            (clip.contains("git push") && clip.contains("JarvisAI"))
+        if (looksLikeTermux && text.isBlank()) {
             text = clip
             UpdateFlow.draft.value = clip
             note = "Termux ka code mila. TERMUX button dabaiye."
         }
     }
+
+    // The panel appears only after "update Jarvis", so check the clipboard when it opens and on each resume.
+    LaunchedEffect(Unit) { fillFromClipboard() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { fillFromClipboard() }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -96,6 +104,9 @@ fun UpdatePanel() {
             OutlinedButton(onClick = { UpdateFlow.openGithubActions(context) }) {
                 Text("GITHUB")
             }
+        }
+        TextButton(onClick = { UpdateFlow.panelVisible.value = false }) {
+            Text("BAND KARO", color = JarvisMuted)
         }
     }
 }

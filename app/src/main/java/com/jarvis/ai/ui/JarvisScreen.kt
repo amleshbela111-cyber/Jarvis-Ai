@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ import com.jarvis.ai.ui.theme.JarvisText
 import com.jarvis.ai.viewmodel.JarvisUiState
 import com.jarvis.ai.viewmodel.JarvisViewModel
 import com.jarvis.ai.voice.ListeningService
+import com.jarvis.ai.update.UpdateFlow
 
 /** Root composable: decides between the home screen and settings. */
 @Composable
@@ -165,6 +167,7 @@ private fun JarvisHome(
     onStop: () -> Unit
 ) {
     val listState = rememberLazyListState()
+    val showUpdate by UpdateFlow.panelVisible.collectAsState()
     LaunchedEffect(ui.messages.size) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.lastIndex)
     }
@@ -228,7 +231,7 @@ private fun JarvisHome(
             }
         }
 
-        UpdatePanel()
+        if (showUpdate) UpdatePanel()
 
         Spacer(Modifier.height(12.dp))
 

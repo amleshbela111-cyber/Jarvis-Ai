@@ -199,6 +199,14 @@ object JarvisCore {
         _snapshot.update { it.copy(listening = on) }
     }
 
+    /** Set by MainActivity. "Close Jarvis" uses it to close the app screen. */
+    @Volatile
+    var closeAppHandler: (() -> Unit)? = null
+
+    fun closeApp() {
+        closeAppHandler?.invoke()
+    }
+
     fun setAutomationPaused(paused: Boolean) {
         _snapshot.update { it.copy(automationPaused = paused) }
     }
@@ -233,6 +241,7 @@ object JarvisCore {
         if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
         if (UPDATE_TRIGGER.containsMatchIn(command)) {
             com.jarvis.ai.update.UpdateFlow.promptMode = true
+            com.jarvis.ai.update.UpdateFlow.panelVisible.value = true
             return "Theek hai, ab apna prompt bolein."
         }
 
