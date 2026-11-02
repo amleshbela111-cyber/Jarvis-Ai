@@ -6,6 +6,8 @@ import android.media.AudioTrack
 import android.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -28,7 +30,7 @@ object NaturalVoice {
 
     /** Tried in order. The first one that works is used. */
     private val MODELS = listOf("gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts")
-    private const val VOICE = "Kore"
+    private const val VOICE = "Charon"
     private const val SAMPLE_RATE = 24000
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -52,9 +54,14 @@ object NaturalVoice {
         stop()
         job = scope.launch {
             try {
-                val pcm = synthesizeWithFallback(key, text)
                 onStart()
-                play(pcm)
+                // Each sentence is made in parallel, and played as soon as it is ready. Speech starts early.
+                coroutineScope {
+                    val pending = splitSentences(text).map { part ->
+                        async { synthesizeWithFallback(key, part) }
+                    }
+                    for (audio in pending) play(audio.await())
+                }
                 onDone()
             } catch (e: CancellationException) {
                 throw e
@@ -64,6 +71,28 @@ object NaturalVoice {
             }
         }
     }
+
+    /** Splits a reply into up to six sentence-sized parts. Very short pieces are joined to the next one. */
+    private fun splitSentences(text: String): List<String> {
+        val parts = text.split(Regex("(?<=[.!?।])\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+        val merged = mutableListOf<String>()
+        var buffer = ""
+        for (part in parts) {
+            buffer = if (buffer.isEmpty()) part else "$buffer $part"
+            if (buffer.length >= MIN_PART_CHARS) {
+                merged += buffer
+                buffer = ""
+            }
+        }
+        if (buffer.isNotEmpty()) merged += buffer
+        if (merged.isEmpty()) return listOf(text)
+        return if (merged.size <= MAX_PARTS) merged else {
+            merged.take(MAX_PARTS - 1) + merged.drop(MAX_PARTS - 1).joinToString(" ")
+        }
+    }
+
+    private const val MIN_PART_CHARS = 25
+    private const val MAX_PARTS = 6
 
     fun stop() {
         job?.cancel()

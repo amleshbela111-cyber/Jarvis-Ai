@@ -38,6 +38,12 @@ object ShizukuShell {
         return runCatching { current.run(command) }.getOrNull()
     }
 
+    /** Takes a screenshot through Shizuku, with no screen-capture prompt. Returns null if not possible. */
+    suspend fun screenshot(): ByteArray? {
+        val current = connect() ?: return null
+        return runCatching { current.screenshot() }.getOrNull()
+    }
+
     private suspend fun connect(): IShellService? {
         service?.let { return it }
         if (!ShizukuBridge.isReady()) return null

@@ -1,4 +1,4 @@
-name: Build debug APK
+name: Build APK
 
 on:
   push:
@@ -23,10 +23,10 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleRelease --no-daemon
 
       - name: Copy APK with a fixed name
-        run: cp app/build/outputs/apk/debug/app-debug.apk JarvisAI.apk
+        run: cp app/build/outputs/apk/release/app-release.apk JarvisAI.apk
 
       - uses: actions/upload-artifact@v4
         with:

@@ -12,13 +12,20 @@ android {
         applicationId = "com.jarvis.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.0.0-faster-local"
+        ndk {
+            // Modern phones are 64-bit ARM. One ABI keeps the APK small.
+            abiFilters += listOf("arm64-v8a")
+        }
+        versionCode = 22
+        versionName = "2.3.0-ocr-light"
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
             isMinifyEnabled = false
@@ -58,9 +65,10 @@ dependencies {
     // Stage 2: encrypted storage for the Gemini API key
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // Stage 5 (OCR): on-device text recognition for screen questions
-    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     // Shizuku: control the phone without Accessibility, after Wireless debugging is paired
     implementation("dev.rikka.shizuku:api:13.1.5")
+
+    // On-device text recognition. The model is downloaded by Google Play services, so the APK stays small.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.2")
 }

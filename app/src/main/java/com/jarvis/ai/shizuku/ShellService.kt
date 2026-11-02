@@ -15,6 +15,22 @@ class ShellService : IShellService.Stub() {
         ""
     }
 
+    /** Takes a screenshot with the system's own tool. Half size JPEG keeps it small enough to send back. */
+    override fun screenshot(): ByteArray {
+        return try {
+            val process = ProcessBuilder("sh", "-c", "screencap -p").start()
+            val png = process.inputStream.use { it.readBytes() }
+            process.waitFor()
+            val full = android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size) ?: return ByteArray(0)
+            val small = android.graphics.Bitmap.createScaledBitmap(full, full.width / 2, full.height / 2, true)
+            val out = java.io.ByteArrayOutputStream()
+            small.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, out)
+            out.toByteArray()
+        } catch (e: Exception) {
+            ByteArray(0)
+        }
+    }
+
     override fun destroy() {
         System.exit(0)
     }
