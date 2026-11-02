@@ -12,8 +12,8 @@ android {
         applicationId = "com.jarvis.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0-fast-background"
+        versionCode = 9
+        versionName = "0.9.0-shizuku-voice"
     }
 
     buildTypes {
@@ -59,4 +59,7 @@ dependencies {
 
     // Stage 5 (OCR): on-device text recognition for screen questions
     implementation("com.google.mlkit:text-recognition:16.0.1")
+
+    // Shizuku: control the phone without Accessibility, after Wireless debugging is paired
+    implementation("dev.rikka.shizuku:api:13.1.5")
 }

@@ -122,9 +122,24 @@ class VoiceController(
 
     private fun applyTtsLanguage() {
         val engine = tts ?: return
-        val result = engine.setLanguage(Locale.forLanguageTag(language.tag))
+        val locale = Locale.forLanguageTag(language.tag)
+        val result = engine.setLanguage(locale)
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
             engine.setLanguage(Locale.US)
+        }
+        // A slightly slower pace and lower pitch sound more like a calm person speaking.
+        engine.setSpeechRate(0.95f)
+        engine.setPitch(0.95f)
+        pickBestVoice(engine, locale)
+    }
+
+    /** Chooses the highest-quality installed voice for this language. Falls back silently. */
+    private fun pickBestVoice(engine: TextToSpeech, locale: Locale) {
+        runCatching {
+            val best = engine.voices.orEmpty()
+                .filter { it.locale.language == locale.language }
+                .maxByOrNull { it.quality }
+            if (best != null) engine.voice = best
         }
     }
 

@@ -116,7 +116,8 @@ fun JarvisApp(viewModel: JarvisViewModel) {
                 },
                 onOpenBattery = viewModel::openBatterySettings,
                 onOpenNotifications = viewModel::openNotificationSettings,
-                onOpenMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                onOpenMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                onRequestShizuku = viewModel::requestShizuku
             )
         } else if (showSettings) {
             SettingsScreen(

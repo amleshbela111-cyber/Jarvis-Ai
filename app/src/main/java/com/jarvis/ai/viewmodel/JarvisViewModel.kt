@@ -1,5 +1,7 @@
 package com.jarvis.ai.viewmodel
 
+import com.jarvis.ai.shizuku.ShizukuBridge
+
 import android.app.Application
 import android.content.Intent
 import android.provider.Settings
@@ -35,6 +37,7 @@ data class JarvisUiState(
     val canWriteSettings: Boolean = false,
     val deviceAdminActive: Boolean = false,
     val accessibilityOn: Boolean = false,
+    val shizukuReady: Boolean = false,
     val screenCaptureOn: Boolean = false,
     val automationPaused: Boolean = false
 )
@@ -85,9 +88,22 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             canWriteSettings = device.canWriteSettings(),
             deviceAdminActive = device.isAdminActive(),
             accessibilityOn = JarvisCore.accessibility().isEnabled(),
+            shizukuReady = ShizukuBridge.isReady(),
             screenCaptureOn = ScreenCaptureService.isRunning,
             automationPaused = snap.automationPaused
         )
+    }
+
+    init {
+        ShizukuBridge.init()
+        ShizukuBridge.onChanged = { refreshDevicePermissions() }
+    }
+
+    /** Opens Shizuku's permission dialog and shows a short status message. */
+    fun requestShizuku() {
+        val message = ShizukuBridge.request()
+        _ui.update { it.copy(settingsMessage = message) }
+        refreshDevicePermissions()
     }
 
     fun setMicPermission(granted: Boolean) {
@@ -167,6 +183,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 canWriteSettings = device.canWriteSettings(),
                 deviceAdminActive = device.isAdminActive(),
                 accessibilityOn = JarvisCore.accessibility().isEnabled(),
+                shizukuReady = ShizukuBridge.isReady(),
                 screenCaptureOn = ScreenCaptureService.isRunning,
                 geminiKeySaved = JarvisCore.keys().hasKey()
             )

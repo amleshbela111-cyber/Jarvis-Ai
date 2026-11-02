@@ -105,10 +105,18 @@ class GeminiClient {
         val root = JSONObject(responseBody)
         val candidates = root.optJSONArray("candidates")
             ?: throw IOException("Gemini returned no answer (the request may have been blocked)")
-        val parts = candidates.getJSONObject(0)
-            .getJSONObject("content")
-            .getJSONArray("parts")
-        return parts.getJSONObject(0).getString("text")
+        val first = candidates.getJSONObject(0)
+        if (first.optString("finishReason") == "MAX_TOKENS") {
+            throw IOException("Gemini answer was cut off (output limit reached)")
+        }
+        val parts = first.getJSONObject("content").getJSONArray("parts")
+        val text = StringBuilder()
+        for (i in 0 until parts.length()) {
+            val part = parts.getJSONObject(i)
+            // Skip internal "thought" parts so only the real answer is used.
+            if (!part.optBoolean("thought", false)) text.append(part.optString("text"))
+        }
+        return text.toString()
     }
 
     private companion object {
@@ -116,6 +124,6 @@ class GeminiClient {
         const val FALLBACK_MODEL = "gemini-3.6-flash"
         const val CONNECT_TIMEOUT_MS = 10_000
         const val READ_TIMEOUT_MS = 20_000
-        const val MAX_OUTPUT_TOKENS = 400
+        const val MAX_OUTPUT_TOKENS = 2048
     }
 }

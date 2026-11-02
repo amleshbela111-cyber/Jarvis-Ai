@@ -41,7 +41,8 @@ fun SetupScreen(
     onRequestScreenCapture: () -> Unit,
     onOpenBattery: () -> Unit,
     onOpenNotifications: () -> Unit,
-    onOpenMicPermission: () -> Unit
+    onOpenMicPermission: () -> Unit,
+    onRequestShizuku: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -66,6 +67,7 @@ fun SetupScreen(
         )
 
         SetupRow("Microphone (sunne ke liye)", ui.micPermissionGranted, "Allow", onOpenMicPermission)
+        SetupRow("Shizuku (Wireless debugging se, Accessibility ki jagah)", ui.shizukuReady, "Allow", onRequestShizuku)
         SetupRow("Accessibility (tap, scroll, type, screen padhna)", ui.accessibilityOn, "Open", onOpenAccessibility)
         SetupRow("Screen reading (screen ke sawal)", ui.screenCaptureOn, "Allow", onRequestScreenCapture)
         SetupRow("Modify system settings (brightness)", ui.canWriteSettings, "Open", onOpenWriteSettings)
