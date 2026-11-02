@@ -37,8 +37,7 @@ class ScreenAnalyzer(
 
         val scaled = scaleDown(frame, MAX_EDGE_PX)
         val jpegBase64 = encodeJpeg(scaled)
-        // OCR runs on-device first. Its text is passed to Gemini as data, not as instructions.
-        // OCR runs on the device. Its text goes to Gemini as data only.
+        // OCR runs on the device. Its text goes to Gemini as data only, never as instructions.
         val ocrText = runCatching { extractText(frame) }.getOrDefault("")
 
         return try {
@@ -130,7 +129,6 @@ class ScreenAnalyzer(
         private const val MAX_ANSWER_CHARS = 800
         private const val MAX_OCR_CHARS = 3_000
         private const val MAX_ITEMS = 40
-        private const val MAX_OCR_CHARS = 3_000
 
         private const val SYSTEM_PROMPT =
             "You answer questions about a phone screenshot. Use only what is visible. " +
