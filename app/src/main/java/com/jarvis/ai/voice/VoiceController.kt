@@ -108,7 +108,7 @@ class VoiceController(
     /** Speaks [text] with the natural Gemini voice, or the phone's voice if that is unavailable. */
     fun speak(text: String): Boolean {
         // Short replies use the phone's voice at once. Longer ones use the natural voice.
-        if (NaturalVoice.canUse() && text.length > SHORT_REPLY_CHARS) {
+        if (NaturalVoice.canUse()) {
             NaturalVoice.speak(
                 text,
                 onStart = { mainHandler.post { listener.onSpeechStarted() } },

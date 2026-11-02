@@ -12,8 +12,8 @@ android {
         applicationId = "com.jarvis.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.8.0-beep-mute"
+        versionCode = 19
+        versionName = "2.0.0-faster-local"
     }
 
     buildTypes {

@@ -83,6 +83,24 @@ object JarvisCore {
 
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
+    private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
+
+    private var appContext: android.content.Context? = null
+
+    /** Battery level, read straight from Android. No internet needed. */
+    private fun batteryReply(): String {
+        val ctx = appContext ?: return "Abhi battery nahi padh paya."
+        val intent = ctx.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+        if (level < 0 || scale <= 0) return "Abhi battery nahi padh paya."
+        val percent = level * 100 / scale
+        val status = intent?.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == android.os.BatteryManager.BATTERY_STATUS_FULL
+        return if (charging) "Battery $percent percent hai, aur charge ho rahi hai." else "Battery $percent percent hai."
+    }
+
     private val yes = Regex("\\b(haan|haa|ha|yes|ok|theek hai|confirm|kar do)\\b", RegexOption.IGNORE_CASE)
     private val no = Regex("\\b(nahi|nahin|no|cancel|rehne do|ruko)\\b", RegexOption.IGNORE_CASE)
 
@@ -90,6 +108,7 @@ object JarvisCore {
     fun init(context: Context) {
         if (deps != null) return
         val app = context.applicationContext
+        appContext = app
         val settings = JarvisSettings(app)
         val keys = ApiKeyStore(app)
         NaturalVoice.apiKeyProvider = { keys.load() }
@@ -211,6 +230,7 @@ object JarvisCore {
             return "Prompt taiyar hai. Screen par CLAUDE button dabaiye."
         }
         SettingsCommands.match(command, d.settings)?.let { return it }
+        if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
         if (UPDATE_TRIGGER.containsMatchIn(command)) {
             com.jarvis.ai.update.UpdateFlow.promptMode = true
             return "Theek hai, ab apna prompt bolein."
