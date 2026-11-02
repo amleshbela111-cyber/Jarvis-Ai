@@ -6,6 +6,11 @@ import com.jarvis.ai.accessibility.AccessibilityActions
 import com.jarvis.ai.voice.NaturalVoice
 import com.jarvis.ai.ai.ActionExecutor
 import com.jarvis.ai.ai.GeminiClient
+import com.jarvis.ai.ai.AppBuilder
+import com.jarvis.ai.github.GitHubClient
+import com.jarvis.ai.github.RepoFile
+import com.jarvis.ai.security.GitHubStore
+import java.io.IOException
 import com.jarvis.ai.ai.JarvisPlanner
 import com.jarvis.ai.ai.ValidatedAction
 import com.jarvis.ai.ai.ValidatedPlan
@@ -69,8 +74,16 @@ object JarvisCore {
     private var nextId = 1L
     private var silentControl = false
     private var deps: Deps? = null
+    private var builder: AppBuilder? = null
+
+    /** A built app waiting for the user's "haan" before it is pushed to GitHub. */
+    private data class PendingBuild(val repo: String, val files: List<RepoFile>)
+    private var pendingBuild: PendingBuild? = null
 
     private val PLAN_TIMEOUT_MS = 28_000L
+
+    /** Building a whole app takes longer than a normal answer. */
+    private val BUILD_TIMEOUT_MS = 150_000L
 
     private val SCREEN_CONTROL = setOf(
         com.jarvis.ai.ai.ActionType.TAP,
@@ -84,6 +97,9 @@ object JarvisCore {
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
     private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
+
+    /** "ऐप बनाओ" / "app banao": Gemini builds an Android project, then the user confirms the push. */
+    private val BUILD_TRIGGER = Regex("(ऐप|app)\\s+(बनाओ|बना\\s*दो|banao|bana\\s*do)", RegexOption.IGNORE_CASE)
 
     private var appContext: android.content.Context? = null
 
@@ -120,6 +136,7 @@ object JarvisCore {
             app, device, accessibility, screen, ProjectWorkspace(app), ApkInstaller(app)
         )
         deps = Deps(settings, keys, device, accessibility, JarvisPlanner(gemini), executor)
+        builder = AppBuilder(gemini)
 
         // Warm up the connection to Gemini in the background, so the first real question is faster.
         val key = keys.load()
@@ -245,6 +262,14 @@ object JarvisCore {
             return "Theek hai, ab apna prompt bolein."
         }
 
+        pendingBuild?.let { b ->
+            pendingBuild = null
+            if (yes.containsMatchIn(command)) return commitBuild(b)
+            if (no.containsMatchIn(command)) return "Theek hai, GitHub par kuch nahi bheja."
+            // Anything else drops the preview, and the command is handled normally below.
+        }
+        if (BUILD_TRIGGER.containsMatchIn(command)) return startBuild(d, command)
+
         pending?.let { p ->
             pending = null
             if (no.containsMatchIn(command)) {
@@ -275,6 +300,44 @@ object JarvisCore {
             return friendlyError(error)
         }
         return runPlan(d, command, plan, confirmed = false)
+    }
+
+    /** Builds the app with Gemini and shows the file list in the chat. Nothing is pushed yet. */
+    private suspend fun startBuild(d: Deps, command: String): String {
+        val apiKey = d.keys.load() ?: return "Gemini API key set nahi hai. Settings mein jaakar key daalein."
+        val appBuilder = builder ?: return "Abhi app banane ki taiyari nahi hui. Dobara bolein."
+        val context = appContext ?: return "Abhi app banane ki taiyari nahi hui. Dobara bolein."
+        val github = GitHubStore(context)
+        val repo = github.repo()
+        if (!github.isConfigured() || repo == null) {
+            return "GitHub repo aur token pehle Settings mein daalein, phir dobara bolein."
+        }
+        val files = withTimeoutOrNull(BUILD_TIMEOUT_MS) {
+            appBuilder.build(apiKey, d.settings.geminiModel, command)
+        } ?: return "App banane mein zyada time lag gaya. Chhota idea bolein."
+
+        pendingBuild = PendingBuild(repo, files)
+        // The file list stays in the chat only, so it is not read out loud.
+        silentControl = true
+        val list = files.joinToString("\n") { "- ${it.path}" }
+        return "App ki ${files.size} files taiyar hain, ${repo} repo mein push hongi:\n$list\n\n" +
+            "Push karne ke liye 'haan' bolein, cancel ke liye 'nahi'."
+    }
+
+    /** Pushes the confirmed files one by one through the GitHub contents API. */
+    private suspend fun commitBuild(b: PendingBuild): String {
+        val context = appContext ?: return "Context nahi mila, dobara bolein."
+        val token = GitHubStore(context).token()
+            ?: return "GitHub token nahi mila. Settings mein dobara daalein."
+        return try {
+            withContext(Dispatchers.IO) {
+                val client = GitHubClient(token)
+                for (file in b.files) client.putFile(b.repo, file, "Jarvis: build app")
+            }
+            "Ho gaya. ${b.files.size} files ${b.repo} par push ho gayi. Build GitHub Actions mein chal raha hai."
+        } catch (e: IOException) {
+            "GitHub par push nahi ho paya: ${e.message?.take(120)}"
+        }
     }
 
     private suspend fun runPlan(d: Deps, command: String, plan: ValidatedPlan, confirmed: Boolean): String {

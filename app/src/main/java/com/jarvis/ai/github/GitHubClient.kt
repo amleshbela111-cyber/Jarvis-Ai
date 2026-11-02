@@ -1,0 +1,66 @@
+package com.jarvis.ai.github
+
+import android.util.Base64
+import org.json.JSONObject
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+/** One file to commit. [path] is relative to the repo root, for example "app/src/main/AndroidManifest.xml". */
+data class RepoFile(val path: String, val content: String)
+
+/**
+ * Minimal GitHub contents API client. The token goes in a header only, never in the URL.
+ * Each call creates or updates one file on the repo's default branch.
+ */
+class GitHubClient(private val token: String) {
+
+    /** Creates or updates [file] in "owner/repo". Throws an IOException with a short message on failure. */
+    fun putFile(ownerRepo: String, file: RepoFile, message: String) {
+        val sha = existingSha(ownerRepo, file.path)
+        val body = JSONObject()
+            .put("message", message)
+            .put("content", Base64.encodeToString(file.content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
+        if (sha != null) body.put("sha", sha)
+
+        val (code, text) = request("PUT", ownerRepo, file.path, body.toString())
+        if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+    }
+
+    /** Returns the blob sha of an existing file, or null when the file does not exist yet. */
+    private fun existingSha(ownerRepo: String, path: String): String? {
+        val (code, text) = request("GET", ownerRepo, path, null)
+        if (code == 404) return null
+        if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+        return JSONObject(text).optString("sha").takeIf { it.isNotBlank() }
+    }
+
+    private fun request(method: String, ownerRepo: String, path: String, body: String?): Pair<Int, String> {
+        val encodedPath = path.split("/").joinToString("/") { segment ->
+            URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
+        val url = URL("https://api.github.com/repos/$ownerRepo/contents/$encodedPath")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 10_000
+            readTimeout = 30_000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            if (body != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+        }
+        try {
+            if (body != null) connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            return code to text
+        } finally {
+            connection.disconnect()
+        }
+    }
+}

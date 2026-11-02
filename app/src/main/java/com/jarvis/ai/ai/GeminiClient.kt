@@ -22,17 +22,22 @@ class GeminiClient {
         systemPrompt: String,
         userPrompt: String,
         imageBase64: String? = null,
-        expectJson: Boolean = true
+        expectJson: Boolean = true,
+        maxTokens: Int = MAX_OUTPUT_TOKENS
     ): String = withContext(Dispatchers.IO) {
         try {
-            callOnce(apiKey, model, systemPrompt, userPrompt, imageBase64, expectJson, PRIMARY_READ_MS)
+            callOnce(apiKey, model, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens, primaryReadMs(maxTokens))
         } catch (e: IOException) {
             // Only retry on network timeouts, not on errors such as a retired model (404) or bad key.
             val retryable = e is java.net.SocketTimeoutException || e is java.net.ConnectException
             if (model == FALLBACK_MODEL || !retryable) throw e
-            callOnce(apiKey, FALLBACK_MODEL, systemPrompt, userPrompt, imageBase64, expectJson, FALLBACK_READ_MS)
+            callOnce(apiKey, FALLBACK_MODEL, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens, primaryReadMs(maxTokens))
         }
     }
+
+    /** Large outputs (whole app builds) need more time to arrive than a short voice reply. */
+    private fun primaryReadMs(maxTokens: Int): Int =
+        if (maxTokens > MAX_OUTPUT_TOKENS) LONG_READ_MS else PRIMARY_READ_MS
 
     private fun callOnce(
         apiKey: String,
@@ -41,6 +46,7 @@ class GeminiClient {
         userPrompt: String,
         imageBase64: String?,
         expectJson: Boolean,
+        maxTokens: Int,
         readTimeoutMs: Int
     ): String {
         val connection = (URL("$BASE_URL/$model:generateContent").openConnection() as HttpURLConnection).apply {
@@ -52,7 +58,7 @@ class GeminiClient {
             setRequestProperty("x-goog-api-key", apiKey)
         }
         try {
-            val body = buildBody(model, systemPrompt, userPrompt, imageBase64, expectJson)
+            val body = buildBody(model, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens)
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -71,7 +77,8 @@ class GeminiClient {
         systemPrompt: String,
         userPrompt: String,
         imageBase64: String?,
-        expectJson: Boolean
+        expectJson: Boolean,
+        maxTokens: Int
     ): String {
         val parts = JSONArray().put(JSONObject().put("text", userPrompt))
         if (imageBase64 != null) {
@@ -85,7 +92,7 @@ class GeminiClient {
 
         val generationConfig = JSONObject()
             .put("temperature", 0.2)
-            .put("maxOutputTokens", MAX_OUTPUT_TOKENS)
+            .put("maxOutputTokens", maxTokens)
         if (expectJson) generationConfig.put("responseMimeType", "application/json")
         // Gemini 2.5 models "think" before answering by default, which adds delay. Turn that off for speed.
         if (model.startsWith("gemini-2.5")) {
@@ -126,6 +133,7 @@ class GeminiClient {
         const val CONNECT_TIMEOUT_MS = 8_000
         const val PRIMARY_READ_MS = 12_000
         const val FALLBACK_READ_MS = 12_000
+        const val LONG_READ_MS = 90_000
         const val MAX_OUTPUT_TOKENS = 2048
     }
 }

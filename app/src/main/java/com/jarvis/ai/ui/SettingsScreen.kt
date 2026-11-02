@@ -186,6 +186,8 @@ fun SettingsScreen(
             }
         }
 
+        GitHubSection()
+
         OutlinedTextField(
             value = modelInput,
             onValueChange = { modelInput = it },
