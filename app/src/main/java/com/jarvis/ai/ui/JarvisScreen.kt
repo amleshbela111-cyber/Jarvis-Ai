@@ -63,6 +63,10 @@ import com.jarvis.ai.viewmodel.JarvisUiState
 import com.jarvis.ai.viewmodel.JarvisViewModel
 import com.jarvis.ai.voice.ListeningService
 import com.jarvis.ai.update.UpdateFlow
+import com.jarvis.ai.core.NeuralView
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 
 /** Root composable: decides between the home screen and settings. */
 @Composable
@@ -168,6 +172,7 @@ private fun JarvisHome(
 ) {
     val listState = rememberLazyListState()
     val showUpdate by UpdateFlow.panelVisible.collectAsState()
+    val neuralAnswer by NeuralView.answer.collectAsState()
     LaunchedEffect(ui.messages.size) {
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.lastIndex)
     }
@@ -201,7 +206,25 @@ private fun JarvisHome(
         StatusRow(ui)
         Spacer(Modifier.height(12.dp))
 
-        JarvisOrb(state = ui.state, soundLevel = ui.soundLevel)
+        if (neuralAnswer != null) {
+            NeuralGraph(state = ui.state, soundLevel = ui.soundLevel)
+            Text(
+                text = neuralAnswer.orEmpty(),
+                color = JarvisText,
+                textAlign = TextAlign.Center,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 140.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 4.dp)
+            )
+            TextButton(onClick = { NeuralView.answer.value = null }) {
+                Text("ORB PAR LAUT CHALO", color = JarvisMuted)
+            }
+        } else {
+            JarvisHud(state = ui.state, soundLevel = ui.soundLevel)
+        }
 
         Spacer(Modifier.height(8.dp))
         Text(

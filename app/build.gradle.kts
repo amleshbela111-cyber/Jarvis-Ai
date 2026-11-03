@@ -69,6 +69,10 @@ dependencies {
     // Shizuku: control the phone without Accessibility, after Wireless debugging is paired
     implementation("dev.rikka.shizuku:api:13.1.5")
 
+    // Offline speech recognition (Vosk) for the "Hey Jarvis" wake word. The models are chosen from the phone.
+    implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation("androidx.documentfile:documentfile:1.0.1")
+
     // On-device text recognition. The model is downloaded by Google Play services, so the APK stays small.
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.2")
 }

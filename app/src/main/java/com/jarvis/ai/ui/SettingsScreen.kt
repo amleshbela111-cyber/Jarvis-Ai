@@ -188,6 +188,8 @@ fun SettingsScreen(
 
         GitHubSection()
 
+        VoskSection()
+
         OutlinedTextField(
             value = modelInput,
             onValueChange = { modelInput = it },

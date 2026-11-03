@@ -6,6 +6,7 @@ import android.media.AudioTrack
 import android.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +43,12 @@ object NaturalVoice {
     var lastError: String = ""
         private set
 
-    fun canUse(): Boolean = apiKeyProvider?.invoke()?.isNotBlank() == true
+    /** Time (ms) until which Gemini voice is paused after a rate limit. Avoids repeating the same error. */
+    @Volatile
+    private var cooldownUntil = 0L
+
+    fun canUse(): Boolean =
+        System.currentTimeMillis() >= cooldownUntil && apiKeyProvider?.invoke()?.isNotBlank() == true
 
     /** Speaks [text] in the background. Calls [onFail] when it cannot, so the caller can use the built-in voice. */
     fun speak(text: String, onStart: () -> Unit, onDone: () -> Unit, onFail: () -> Unit) {
@@ -56,17 +62,28 @@ object NaturalVoice {
             try {
                 onStart()
                 // Each sentence is made in parallel, and played as soon as it is ready. Speech starts early.
+                // One part is made ahead while the current part plays, so at most two requests run at once.
+                // Many parallel requests at once hit the rate limit (HTTP 429).
                 coroutineScope {
-                    val pending = splitSentences(text).map { part ->
-                        async { synthesizeWithFallback(key, part) }
+                    val parts = splitSentences(text)
+                    var next: Deferred<ByteArray>? = async { synthesizeWithFallback(key, parts[0]) }
+                    for (i in parts.indices) {
+                        val current = next?.await() ?: break
+                        next = if (i + 1 < parts.size) {
+                            async { synthesizeWithFallback(key, parts[i + 1]) }
+                        } else {
+                            null
+                        }
+                        play(current)
                     }
-                    for (audio in pending) play(audio.await())
                 }
                 onDone()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 lastError = e.message ?: "unknown"
+                // A rate limit usually means the key's quota is used up for now. Pause Gemini voice for a while.
+                if (lastError.contains("429")) cooldownUntil = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MS
                 onFail()
             }
         }
@@ -93,6 +110,9 @@ object NaturalVoice {
 
     private const val MIN_PART_CHARS = 25
     private const val MAX_PARTS = 6
+    private const val RATE_LIMIT_ATTEMPTS = 3
+    private const val RATE_LIMIT_WAIT_MS = 2_000L
+    private const val RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000L
 
     fun stop() {
         job?.cancel()
@@ -107,10 +127,16 @@ object NaturalVoice {
     private fun synthesizeWithFallback(apiKey: String, text: String): ByteArray {
         var failure: Exception? = null
         for (model in MODELS) {
-            try {
-                return synthesize(apiKey, text, model)
-            } catch (e: Exception) {
-                failure = e
+            // A rate-limit (429) is temporary: wait a little and try again before giving up.
+            for (attempt in 1..RATE_LIMIT_ATTEMPTS) {
+                try {
+                    return synthesize(apiKey, text, model)
+                } catch (e: Exception) {
+                    failure = e
+                    val rateLimited = e.message?.contains("429") == true
+                    if (!rateLimited) break
+                    if (attempt < RATE_LIMIT_ATTEMPTS) Thread.sleep(RATE_LIMIT_WAIT_MS * attempt)
+                }
             }
         }
         throw failure ?: IllegalStateException("no TTS model")

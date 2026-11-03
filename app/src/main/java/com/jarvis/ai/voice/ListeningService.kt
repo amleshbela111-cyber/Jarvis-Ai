@@ -41,10 +41,15 @@ class ListeningService : Service(), VoiceController.Listener {
     /** Until this time (ms), Jarvis is awake and takes commands without "Hey Jarvis". */
     private var awakeUntil = 0L
 
+    /** Offline "Hey Jarvis" listener (Vosk). Used only while Jarvis is asleep and a model is saved. */
+    private var wake: WakeWordListener? = null
+    private var wakeListening = false
+
     override fun onCreate() {
         super.onCreate()
         JarvisCore.init(this)
         voice = VoiceController(this, this)
+        wake = WakeWordListener(this) { handler.post { onWakeWord() } }.also { it.preload() }
         startAsForeground()
     }
 
@@ -67,12 +72,14 @@ class ListeningService : Service(), VoiceController.Listener {
     private fun pauseListening() {
         JarvisCore.setListening(false)
         handler.removeCallbacks(restartRunnable)
+        stopWake()
         voice.stopListening()
         JarvisCore.setVoiceState(JarvisState.IDLE, "Mic band hai. MIC dabakar dobara chalu karein.")
     }
 
     private fun stopEverything() {
         handler.removeCallbacks(restartRunnable)
+        stopWake()
         voice.stopSpeaking()
         JarvisCore.cancelCurrent()
         busy = false
@@ -80,16 +87,37 @@ class ListeningService : Service(), VoiceController.Listener {
     }
 
     private fun beginListening() {
-        if (busy || sessionActive || !JarvisCore.snapshot.value.listening) return
+        if (busy || sessionActive || wakeListening || !JarvisCore.snapshot.value.listening) return
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         if (!granted) {
             JarvisCore.setVoiceState(JarvisState.ERROR, "Microphone permission chahiye.")
             return
         }
+        // Asleep and a model is saved: wait for "Hey Jarvis" offline. Google's recognizer stays closed (no beep).
+        if (System.currentTimeMillis() >= awakeUntil && VoskModelStore.isReady(this, "en")) {
+            wakeListening = true
+            JarvisCore.setVoiceState(JarvisState.IDLE, "\"Hey Jarvis\" bolein...")
+            if (wake?.start() == true) return
+            wakeListening = false
+        }
         voice.setLanguage(JarvisCore.settings().speechLanguage)
         sessionActive = true
         voice.startListening()
+    }
+
+    /** "Hey Jarvis" was heard: stop the offline listener, stay awake, and start the command recognizer. */
+    private fun onWakeWord() {
+        if (!wakeListening) return
+        stopWake()
+        awakeUntil = System.currentTimeMillis() + AWAKE_MS
+        JarvisCore.setVoiceState(JarvisState.LISTENING, "Haan, bolein.")
+        handler.postDelayed({ beginListening() }, WAKE_HANDOFF_MS)
+    }
+
+    private fun stopWake() {
+        wakeListening = false
+        wake?.stop()
     }
 
     private fun scheduleRestart(delayMs: Long) {
@@ -164,6 +192,7 @@ class ListeningService : Service(), VoiceController.Listener {
         busy = false
         sessionActive = false
         awakeUntil = 0L
+        stopWake()
         voice.stopListening()
         voice.stopSpeaking()
         JarvisCore.cancelCurrent()
@@ -230,6 +259,7 @@ class ListeningService : Service(), VoiceController.Listener {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        stopWake()
         voice.release()
         JarvisCore.setListening(false)
         JarvisCore.setVoiceState(JarvisState.IDLE, "Jarvis band hai.")
@@ -247,6 +277,9 @@ class ListeningService : Service(), VoiceController.Listener {
 
         /** How long Jarvis stays awake after a reply, so follow-up questions need no wake word. */
         private const val AWAKE_MS = 20_000L
+
+        /** Short pause after "Hey Jarvis", so the offline mic is released before the command recognizer opens it. */
+        private const val WAKE_HANDOFF_MS = 400L
 
         private val WAKE_TRIGGER = Regex(
             "(hey|hi|he|हे|हाय)\\s*,?\\s*(jarvis|jarwis|jarvish|javis|जार्विस|जारविस|जार्वीस)",

@@ -76,6 +76,12 @@ object JarvisCore {
     private var deps: Deps? = null
     private var builder: AppBuilder? = null
 
+    private val BUILD_YES = Regex(
+        "haan|haa|han|हाँ|हां|हा|हान|\\bha\\b|yes|\\bok\\b|theek|ठीक|confirm|push|पुश|kar\\s*do|कर\\s*दो|karo|करो",
+        RegexOption.IGNORE_CASE
+    )
+    private val BUILD_NO = Regex("nahi|nahin|\\bno\\b|cancel|नहीं|नही|रहने\\s*दो", RegexOption.IGNORE_CASE)
+
     /** A built app waiting for the user's "haan" before it is pushed to GitHub. */
     private data class PendingBuild(val repo: String, val files: List<RepoFile>)
     private var pendingBuild: PendingBuild? = null
@@ -97,6 +103,12 @@ object JarvisCore {
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
     private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
+
+    /** "neural waves synthesize karo ...": the answer is shown in the 3D neural view. */
+    private val NEURAL_TRIGGER = Regex(
+        "(neural|न्यूरो).*(wave|वेव|synth|सिंथ)|(wave|वेव|synth|सिंथ).*(neural|न्यूरो)",
+        RegexOption.IGNORE_CASE
+    )
 
     /** "ऐप बनाओ" / "app banao": Gemini builds an Android project, then the user confirms the push. */
     private val BUILD_TRIGGER = Regex(
@@ -244,6 +256,7 @@ object JarvisCore {
         } catch (e: Exception) {
             "Kuch galat ho gaya: ${e.message ?: "unknown error"}"
         }
+        if (NEURAL_TRIGGER.containsMatchIn(command)) NeuralView.answer.value = reply
         append(Sender.JARVIS, reply)
         setVoiceState(JarvisState.IDLE, if (_snapshot.value.listening) "Sun raha hoon..." else "Mic band hai.")
         return reply
@@ -266,10 +279,17 @@ object JarvisCore {
         }
 
         pendingBuild?.let { b ->
-            pendingBuild = null
-            if (yes.containsMatchIn(command)) return commitBuild(b)
-            if (no.containsMatchIn(command)) return "Theek hai, GitHub par kuch nahi bheja."
-            // Anything else drops the preview, and the command is handled normally below.
+            // Speech often comes back as "हाँ", "हां", "han" or "push karo", so all of these count as yes.
+            if (BUILD_YES.containsMatchIn(command)) {
+                pendingBuild = null
+                return commitBuild(b)
+            }
+            if (BUILD_NO.containsMatchIn(command)) {
+                pendingBuild = null
+                return "Theek hai, GitHub par kuch nahi bheja."
+            }
+            // Anything else keeps the preview, so the user can still say "haan".
+            return "Preview abhi bhi hai. GitHub par bhejne ke liye 'haan' bolein, cancel ke liye 'nahi'."
         }
         if (BUILD_TRIGGER.containsMatchIn(command)) return startBuild(d, command)
 
