@@ -99,7 +99,10 @@ object JarvisCore {
     private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
 
     /** "ऐप बनाओ" / "app banao": Gemini builds an Android project, then the user confirms the push. */
-    private val BUILD_TRIGGER = Regex("(ऐप|app)\\s+(बनाओ|बना\\s*दो|banao|bana\\s*do)", RegexOption.IGNORE_CASE)
+    private val BUILD_TRIGGER = Regex(
+        "(create|make|build|banao|bana|बनाओ|बना|क्रिएट|मेक).*(app|ऐप)|(app|ऐप).*(banao|bana|बनाओ|बना|create|make|क्रिएट|मेक)",
+        RegexOption.IGNORE_CASE
+    )
 
     private var appContext: android.content.Context? = null
 
