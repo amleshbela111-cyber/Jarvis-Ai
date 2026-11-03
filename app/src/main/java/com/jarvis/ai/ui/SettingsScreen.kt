@@ -30,12 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jarvis.ai.model.SpeechLanguage
+import com.jarvis.ai.security.GroqKeyStore
 import com.jarvis.ai.storage.ActivityLog
 import com.jarvis.ai.ui.theme.JarvisBackground
 import com.jarvis.ai.ui.theme.JarvisCyan
@@ -188,6 +190,8 @@ fun SettingsScreen(
 
         GitHubSection()
 
+        GroqSection()
+
         VoskSection()
 
         OutlinedTextField(
@@ -298,6 +302,64 @@ private fun PermissionRow(
                 Text("Stop")
             }
         }
+    }
+}
+
+/** Groq key for Whisper speech-to-text. Stored encrypted; leave it empty to use the phone's recognizer. */
+@Composable
+private fun GroqSection() {
+    val context = LocalContext.current
+    val store = remember { GroqKeyStore(context) }
+    var saved by remember { mutableStateOf(store.isSet()) }
+    var input by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+
+    SectionTitle("Speech (Groq Whisper)")
+    Text(
+        text = if (saved) "Groq key: saved (encrypted on this phone)" else "Groq key: not set (phone recognizer is used)",
+        color = if (saved) JarvisCyan else JarvisMuted,
+        fontSize = 13.sp
+    )
+    OutlinedTextField(
+        value = input,
+        onValueChange = { input = it },
+        label = { Text("Groq API key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        colors = jarvisFieldColors(),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = {
+                val key = input.trim()
+                if (key.length < 20) {
+                    message = "Groq key bahut chhoti lag rahi hai."
+                } else {
+                    runCatching { store.save(key) }
+                        .onSuccess { message = "Groq key save ho gayi." }
+                        .onFailure { message = "Groq key save nahi ho payi: ${it.message?.take(60)}" }
+                    input = ""
+                    saved = store.isSet()
+                }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
+        ) {
+            Text("Save key")
+        }
+        OutlinedButton(
+            onClick = {
+                runCatching { store.clear() }
+                message = "Groq key hata di."
+                saved = store.isSet()
+            },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError)
+        ) {
+            Text("Remove key")
+        }
+    }
+    if (message.isNotBlank()) {
+        Text(text = message, color = JarvisText, fontSize = 13.sp)
     }
 }
 

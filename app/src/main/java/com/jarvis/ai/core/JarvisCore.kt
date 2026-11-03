@@ -7,6 +7,7 @@ import com.jarvis.ai.voice.NaturalVoice
 import com.jarvis.ai.ai.ActionExecutor
 import com.jarvis.ai.ai.GeminiClient
 import com.jarvis.ai.ai.AppBuilder
+import com.jarvis.ai.ai.AppFixer
 import com.jarvis.ai.github.GitHubClient
 import com.jarvis.ai.github.RepoFile
 import com.jarvis.ai.security.GitHubStore
@@ -357,7 +358,16 @@ object JarvisCore {
                 val client = GitHubClient(token)
                 for (file in b.files) client.putFile(b.repo, file, "Jarvis: build app")
             }
-            "Ho gaya. ${b.files.size} files ${b.repo} par push ho gayi. Build GitHub Actions mein chal raha hai."
+            // Watch the build in the background. If it fails, Jarvis fixes the files and pushes again.
+            val pushedAt = System.currentTimeMillis()
+            keys().load()?.let { apiKey ->
+                scope.launch {
+                    AppFixer.watch(apiKey, settings().geminiModel, b.repo, token, b.files, pushedAt) { msg ->
+                        scope.launch { append(Sender.JARVIS, msg) }
+                    }
+                }
+            }
+            "Ho gaya. ${b.files.size} files ${b.repo} par push ho gayi. Build GitHub Actions mein chal raha hai, aur fail hua to main sudhar kar dobara bhejunga."
         } catch (e: IOException) {
             "GitHub par push nahi ho paya: ${e.message?.take(120)}"
         }

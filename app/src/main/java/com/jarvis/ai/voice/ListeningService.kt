@@ -17,6 +17,15 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.jarvis.ai.MainActivity
+import com.jarvis.ai.security.GroqKeyStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancelChildren
 import com.jarvis.ai.core.JarvisCore
 import com.jarvis.ai.model.JarvisState
 
@@ -37,6 +46,9 @@ class ListeningService : Service(), VoiceController.Listener {
     private var sessionActive = false
 
     private val restartRunnable = Runnable { beginListening() }
+
+    /** Runs the Groq recording and network calls, always on the main thread's launcher, with blocking work moved to IO. */
+    private val netScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     /** Until this time (ms), Jarvis is awake and takes commands without "Hey Jarvis". */
     private var awakeUntil = 0L
@@ -73,6 +85,7 @@ class ListeningService : Service(), VoiceController.Listener {
         JarvisCore.setListening(false)
         handler.removeCallbacks(restartRunnable)
         stopWake()
+        netScope.coroutineContext.cancelChildren()
         voice.stopListening()
         JarvisCore.setVoiceState(JarvisState.IDLE, "Mic band hai. MIC dabakar dobara chalu karein.")
     }
@@ -101,9 +114,50 @@ class ListeningService : Service(), VoiceController.Listener {
             if (wake?.start() == true) return
             wakeListening = false
         }
+        // Groq Whisper gives the most accurate Hindi-English text, so it is used whenever its key is saved.
+        if (GroqKeyStore(this).isSet()) {
+            sessionActive = true
+            JarvisCore.setVoiceState(JarvisState.LISTENING, "Sun raha hoon...")
+            listenWithGroq()
+            return
+        }
+        startPhoneRecognizer()
+    }
+
+    private fun startPhoneRecognizer() {
         voice.setLanguage(JarvisCore.settings().speechLanguage)
         sessionActive = true
         voice.startListening()
+    }
+
+    /** Records one sentence, sends it to Groq Whisper, and passes the text on. Falls back to the phone's recognizer on error. */
+    private fun listenWithGroq() {
+        val key = GroqKeyStore(this).load()
+        if (key.isNullOrBlank()) {
+            startPhoneRecognizer()
+            return
+        }
+        netScope.launch {
+            val pcm = withContext(Dispatchers.IO) { GroqSpeech.recordUtterance() }
+            if (pcm == null) {
+                sessionActive = false
+                if (!busy) scheduleRestart(RESTART_DELAY_MS)
+                return@launch
+            }
+            val result = runCatching { withContext(Dispatchers.IO) { GroqSpeech.transcribe(key, pcm) } }
+            result.onSuccess { text ->
+                if (text.isBlank()) {
+                    sessionActive = false
+                    if (!busy) scheduleRestart(RESTART_DELAY_MS)
+                } else {
+                    onFinalResult(text)
+                }
+            }.onFailure { error ->
+                sessionActive = false
+                JarvisCore.setVoiceState(JarvisState.IDLE, "Groq awaaz nahi samajh paya (${error.message?.take(60)}). Phone ka recognizer use kiya.")
+                startPhoneRecognizer()
+            }
+        }
     }
 
     /** "Hey Jarvis" was heard: stop the offline listener, stay awake, and start the command recognizer. */
@@ -260,6 +314,7 @@ class ListeningService : Service(), VoiceController.Listener {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         stopWake()
+        netScope.cancel()
         voice.release()
         JarvisCore.setListening(false)
         JarvisCore.setVoiceState(JarvisState.IDLE, "Jarvis band hai.")
