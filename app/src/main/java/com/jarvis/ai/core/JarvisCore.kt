@@ -117,10 +117,14 @@ object JarvisCore {
     )
 
     /** "ऐप बनाओ" / "app banao": Gemini builds an Android project, then the user confirms the push. */
+    // "ऐप", "एप", "एप्प" and "app" are all accepted, because speech often writes the word in any of these ways.
     private val BUILD_TRIGGER = Regex(
-        "(create|make|build|banao|bana|बनाओ|बना|क्रिएट|मेक).*(app|ऐप)|(app|ऐप).*(banao|bana|बनाओ|बना|create|make|क्रिएट|मेक)",
+        "(create|make|build|banao|bana|बनाओ|बना|क्रिएट|मेक).*(app|ऐप|एप्प|एप|ऐप्प)|(app|ऐप|एप्प|एप|ऐप्प).*(banao|bana|बनाओ|बना|create|make|क्रिएट|मेक)",
         RegexOption.IGNORE_CASE
     )
+
+    /** "गिटहब पर पुश करो" with no app waiting: tells the user what to do instead of letting the planner refuse. */
+    private val PUSH_WORDS = Regex("गिटहब|गिटहब|github|पुश|पूश|पूस|push", RegexOption.IGNORE_CASE)
 
     private var appContext: android.content.Context? = null
 
@@ -158,6 +162,7 @@ object JarvisCore {
         )
         deps = Deps(settings, keys, device, accessibility, JarvisPlanner(gemini), executor)
         builder = AppBuilder(gemini)
+        loadHistory(app)
 
         // Warm up the connection to Gemini in the background, so the first real question is faster.
         val key = keys.load()
@@ -311,6 +316,9 @@ object JarvisCore {
             return "Preview abhi bhi hai. GitHub par bhejne ke liye 'haan' bolein, cancel ke liye 'nahi'."
         }
         if (BUILD_TRIGGER.containsMatchIn(command)) return startBuild(d, command)
+        if (PUSH_WORDS.containsMatchIn(command)) {
+            return "Abhi GitHub par bhejne ke liye koi app taiyar nahi hai. Pehle 'ऐप बनाओ' bolein, file list aane par 'haan' bolein."
+        }
 
         pending?.let { p ->
             pending = null
@@ -319,6 +327,17 @@ object JarvisCore {
                 return "Theek hai, action cancel kar diya."
             }
             if (yes.containsMatchIn(command)) return runPlan(d, p.command, p.plan, confirmed = true)
+        }
+
+        // A pending "which app?" question from an earlier "open" command is answered first.
+        d.device.pendingAppChoices?.let { choices ->
+            d.device.pendingAppChoices = null
+            if (CHOICE_NO.containsMatchIn(command)) return "Theek hai, app nahi khola."
+            val app = pickAppChoice(command, choices)
+            if (app != null) {
+                val outcome = d.device.launchPackage(app.packageName)
+                return if (outcome.success) "${app.label} khol raha hoon." else outcome.message
+            }
         }
 
         LocalCommands.match(command)?.let { return runPlan(d, command, it, confirmed = false) }
@@ -446,7 +465,56 @@ object JarvisCore {
         _snapshot.update { current ->
             current.copy(messages = (current.messages + ChatMessage(nextId++, sender, text)).takeLast(MAX_MESSAGES))
         }
+        saveHistory()
     }
+
+    /** Chat is kept on the phone, so the conversation is still there after the app or phone restarts. */
+    private fun saveHistory() {
+        val ctx = appContext ?: return
+        val array = org.json.JSONArray()
+        _snapshot.value.messages.forEach {
+            array.put(org.json.JSONObject().put("s", it.sender.name).put("t", it.text))
+        }
+        runCatching {
+            ctx.getSharedPreferences(HISTORY_PREFS, Context.MODE_PRIVATE)
+                .edit().putString(HISTORY_KEY, array.toString()).apply()
+        }
+    }
+
+    private fun loadHistory(ctx: Context) {
+        val raw = runCatching {
+            ctx.getSharedPreferences(HISTORY_PREFS, Context.MODE_PRIVATE).getString(HISTORY_KEY, null)
+        }.getOrNull() ?: return
+        val loaded = runCatching {
+            val array = org.json.JSONArray(raw)
+            (0 until array.length()).map { i ->
+                val obj = array.getJSONObject(i)
+                val sender = Sender.valueOf(obj.getString("s"))
+                ChatMessage(nextId++, sender, obj.getString("t"))
+            }
+        }.getOrDefault(emptyList())
+        if (loaded.isNotEmpty()) _snapshot.update { it.copy(messages = loaded.takeLast(MAX_MESSAGES)) }
+    }
+
+    /** Matches a spoken choice ("ek", "do", "pehla", "2", or the app name) to one of the listed apps. */
+    private fun pickAppChoice(command: String, apps: List<DeviceController.LaunchableApp>): DeviceController.LaunchableApp? {
+        val lower = command.lowercase().trim()
+        val words = mapOf(
+            "1" to 0, "ek" to 0, "एक" to 0, "pehla" to 0, "पहला" to 0, "first" to 0,
+            "2" to 1, "do" to 1, "दो" to 1, "dusra" to 1, "दूसरा" to 1, "second" to 1,
+            "3" to 2, "teen" to 2, "तीन" to 2, "tisra" to 2, "तीसरा" to 2, "third" to 2,
+            "4" to 3, "chaar" to 3, "चार" to 3,
+            "5" to 4, "paanch" to 4, "पाँच" to 4
+        )
+        val tokens = lower.split(Regex("\\s+"))
+        words.entries.firstOrNull { tokens.contains(it.key) || lower == it.key }?.let { return apps.getOrNull(it.value) }
+        return apps.firstOrNull { lower.contains(it.label.lowercase()) }
+    }
+
+    private val CHOICE_NO = Regex("nahi|nahin|\\bno\\b|cancel|रहने\\s*दो", RegexOption.IGNORE_CASE)
+
+    private const val HISTORY_PREFS = "jarvis_chat_history"
+    private const val HISTORY_KEY = "messages"
 
     private const val MAX_MESSAGES = 60
 }

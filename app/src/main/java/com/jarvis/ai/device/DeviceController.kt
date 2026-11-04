@@ -136,16 +136,44 @@ class DeviceController(private val context: Context) {
 
     data class LaunchableApp(val label: String, val packageName: String)
 
-    /** Apps that have a launcher icon. Visibility on Android 11+ depends on the <queries> entry in the manifest. */
+    /** Apps the user may pick from when a name matches more than one. Set by [launchApp], used by JarvisCore. */
+    @Volatile
+    var pendingAppChoices: List<LaunchableApp>? = null
+
+    private var cachedApps: List<LaunchableApp> = emptyList()
+    private var cachedAt = 0L
+
+    /**
+     * Apps that have a launcher icon. Visibility on Android 11+ depends on the <queries> entry in the manifest.
+     * The list is cached for a minute, so a second "open" command does not query the whole system again.
+     */
     fun launchableApps(): List<LaunchableApp> {
+        val now = System.currentTimeMillis()
+        if (cachedApps.isNotEmpty() && now - cachedAt < APP_CACHE_MS) return cachedApps
         val pm = context.packageManager
         val query = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return pm.queryIntentActivities(query, 0)
+        cachedApps = pm.queryIntentActivities(query, 0)
             .mapNotNull { info ->
                 val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
                 LaunchableApp(info.loadLabel(pm).toString(), pkg)
             }
             .distinctBy { it.packageName }
+            .sortedBy { it.label.lowercase() }
+        cachedAt = now
+        return cachedApps
+    }
+
+    /** Opens an app directly by package name, used after the user picks one from several matches. */
+    fun launchPackage(packageName: String): Outcome {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(packageName)
+            ?: return Outcome(false, "That app cannot be opened.")
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(launchIntent)
+            Outcome(true, "Opening the app.")
+        } catch (e: ActivityNotFoundException) {
+            Outcome(false, "That app cannot be opened.")
+        }
     }
 
     /** Opens an app by its installed name, or by package name if the plan gives one. */
@@ -161,13 +189,16 @@ class DeviceController(private val context: Context) {
             val matches = if (exact.isNotEmpty()) exact else apps.filter { it.label.contains(name, ignoreCase = true) }
             when {
                 matches.isEmpty() -> return Outcome(false, "No app named \"$name\" is installed.")
-                matches.size > 1 -> return Outcome(
-                    false,
-                    "More than one app matches \"$name\": ${matches.joinToString { it.label }}. Please say the full name."
-                )
+                matches.size > 1 -> {
+                    val shown = matches.take(5)
+                    pendingAppChoices = shown
+                    val list = shown.mapIndexed { i, app -> "${i + 1}. ${app.label}" }.joinToString(", ")
+                    return Outcome(false, "\"$name\" se kai apps mile: $list. Number ya naam bolein.")
+                }
                 else -> matches.first().packageName
             }
         }
+        pendingAppChoices = null
 
         val launchIntent = pm.getLaunchIntentForPackage(targetPackage)
             ?: return Outcome(false, "That app cannot be opened.")
@@ -216,5 +247,6 @@ class DeviceController(private val context: Context) {
 
     private companion object {
         const val TORCH_TIMEOUT_MS = 3_000L
+        const val APP_CACHE_MS = 60_000L
     }
 }

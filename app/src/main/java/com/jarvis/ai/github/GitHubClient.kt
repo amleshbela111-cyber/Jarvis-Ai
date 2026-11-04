@@ -24,15 +24,15 @@ class GitHubClient(private val token: String) {
             .put("content", Base64.encodeToString(file.content.toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
         if (sha != null) body.put("sha", sha)
 
-        val (code, text) = request("PUT", ownerRepo, file.path, body.toString())
-        if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+        val (code, text) = retried { request("PUT", ownerRepo, file.path, body.toString()) }
+        if (code !in 200..299) throw IOException("GitHub ${code} on ${file.path}: ${text.take(160).ifBlank { "server error, try again" }}")
     }
 
     /** Deletes [path] from "owner/repo". [sha] is the file's blob sha, as [listFiles] returns it. */
     fun deleteFile(ownerRepo: String, path: String, sha: String, message: String) {
         val body = JSONObject().put("message", message).put("sha", sha)
-        val (code, text) = request("DELETE", ownerRepo, path, body.toString())
-        if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+        val (code, text) = retried { request("DELETE", ownerRepo, path, body.toString()) }
+        if (code !in 200..299) throw IOException("GitHub ${code} on ${path}: ${text.take(160).ifBlank { "server error, try again" }}")
     }
 
     /**
@@ -73,6 +73,18 @@ class GitHubClient(private val token: String) {
         if (code == 404) return null
         if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
         return JSONObject(text).optString("sha").takeIf { it.isNotBlank() }
+    }
+
+    /** GitHub sometimes answers 500 for a moment. Retry those up to 3 times with a short wait. Other answers are returned as they are. */
+    private fun retried(call: () -> Pair<Int, String>): Pair<Int, String> {
+        var result = call()
+        var attempt = 1
+        while (result.first in 500..599 && attempt < 3) {
+            Thread.sleep(1500L * attempt)
+            result = call()
+            attempt++
+        }
+        return result
     }
 
     private fun request(method: String, ownerRepo: String, path: String, body: String?): Pair<Int, String> {
