@@ -131,6 +131,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
                 onBack = { showSettings = false },
                 onLanguageSelected = viewModel::setLanguage,
                 onSpeakToggle = viewModel::setSpeakResponses,
+                onGeminiVoiceToggle = viewModel::setUseGeminiVoice,
                 onSaveKey = viewModel::saveApiKey,
                 onClearKey = viewModel::clearApiKey,
                 onSaveModel = viewModel::saveGeminiModel,

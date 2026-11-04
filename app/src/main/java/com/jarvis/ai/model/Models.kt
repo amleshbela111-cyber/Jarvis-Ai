@@ -20,6 +20,6 @@ data class ChatMessage(
 
 /** Languages the recognizer and TTS engine are configured for. */
 enum class SpeechLanguage(val tag: String, val label: String) {
-    ENGLISH_INDIA("en-IN", "English (India)"),
-    HINDI_INDIA("hi-IN", "Hindi (India)")
+    ENGLISH_INDIA("en-IN", "English awaaz (phone)"),
+    HINDI_INDIA("hi-IN", "Hindi awaaz (phone)")
 }

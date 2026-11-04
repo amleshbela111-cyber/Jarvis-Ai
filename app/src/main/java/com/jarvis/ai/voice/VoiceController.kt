@@ -107,8 +107,12 @@ class VoiceController(
 
     /** Speaks [text] with the natural Gemini voice, or the phone's voice if that is unavailable. */
     fun speak(text: String): Boolean {
-        // Short replies use the phone's voice at once. Longer ones use the natural voice.
-        if (NaturalVoice.canUse()) {
+        // Set the phone voice's language from the current setting every time, so the chosen language is used.
+        runCatching { language = JarvisCore.settings().speechLanguage }
+        if (ttsReady) applyTtsLanguage()
+        // The phone's built-in voice is the default. Gemini's voice is used only when turned on in Settings.
+        val useGemini = runCatching { JarvisCore.settings().useGeminiVoice }.getOrDefault(false)
+        if (useGemini && NaturalVoice.canUse()) {
             NaturalVoice.speak(
                 text,
                 onStart = { mainHandler.post { listener.onSpeechStarted() } },
@@ -164,7 +168,10 @@ class VoiceController(
             }
         )
         engine.setPitch(0.95f)
-        pickBestVoice(engine, locale)
+        // A voice picked in Settings wins. Otherwise the best installed voice for this language is used.
+        val chosen = runCatching { JarvisCore.settings().voiceName(language) }.getOrNull()
+        val picked = chosen?.let { name -> engine.voices.orEmpty().firstOrNull { it.name == name } }
+        if (picked != null) engine.voice = picked else pickBestVoice(engine, locale)
     }
 
     /** Chooses the highest-quality installed voice for this language. Falls back silently. */

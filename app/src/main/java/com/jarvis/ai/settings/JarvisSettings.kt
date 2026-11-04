@@ -28,6 +28,20 @@ class JarvisSettings(context: Context) {
             prefs.edit().putBoolean(KEY_SPEAK_RESPONSES, value).apply()
         }
 
+    /** The phone voice picked for one language (its name as Android lists it), or null for the automatic choice. */
+    fun voiceName(language: SpeechLanguage): String? = prefs.getString(KEY_VOICE_PREFIX + language.tag, null)
+
+    fun setVoiceName(language: SpeechLanguage, name: String) {
+        prefs.edit().putString(KEY_VOICE_PREFIX + language.tag, name).apply()
+    }
+
+    /** False (default) uses the phone's built-in voice for the chosen language. True uses Gemini's voice. */
+    var useGeminiVoice: Boolean
+        get() = prefs.getBoolean(KEY_GEMINI_VOICE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_GEMINI_VOICE, value).apply()
+        }
+
     var geminiModel: String
         get() {
             val saved = prefs.getString(KEY_GEMINI_MODEL, null)
@@ -69,5 +83,7 @@ class JarvisSettings(context: Context) {
         private const val KEY_REPLY_STYLE = "reply_style"
         private const val KEY_VOICE_SPEED = "voice_speed"
         private const val KEY_MUTE_BEEP = "mute_beep"
+        private const val KEY_GEMINI_VOICE = "use_gemini_voice"
+        private const val KEY_VOICE_PREFIX = "phone_voice_"
     }
 }

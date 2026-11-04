@@ -31,6 +31,7 @@ data class JarvisUiState(
     val statusMessage: String = "",
     val language: SpeechLanguage = SpeechLanguage.ENGLISH_INDIA,
     val speakResponses: Boolean = true,
+    val useGeminiVoice: Boolean = false,
     val geminiKeySaved: Boolean = false,
     val geminiModel: String = JarvisSettings.DEFAULT_MODEL,
     val settingsMessage: String = "",
@@ -83,6 +84,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             listening = snap.listening,
             language = settings.speechLanguage,
             speakResponses = settings.speakResponses,
+            useGeminiVoice = settings.useGeminiVoice,
             geminiKeySaved = JarvisCore.keys().hasKey(),
             geminiModel = settings.geminiModel,
             canWriteSettings = device.canWriteSettings(),
@@ -127,6 +129,12 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     fun setLanguage(language: SpeechLanguage) {
         JarvisCore.settings().speechLanguage = language
         _ui.update { it.copy(language = language) }
+    }
+
+    /** On: Gemini's voice. Off: the phone's built-in voice for the chosen language. */
+    fun setUseGeminiVoice(enabled: Boolean) {
+        JarvisCore.settings().useGeminiVoice = enabled
+        _ui.update { it.copy(useGeminiVoice = enabled) }
     }
 
     fun setSpeakResponses(enabled: Boolean) {

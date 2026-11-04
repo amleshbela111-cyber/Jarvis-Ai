@@ -36,8 +36,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.jarvis.ai.core.JarvisCore
 import com.jarvis.ai.model.SpeechLanguage
 import com.jarvis.ai.security.GroqKeyStore
+import com.jarvis.ai.voice.PhoneVoices
+import androidx.compose.runtime.LaunchedEffect
 import com.jarvis.ai.storage.ActivityLog
 import com.jarvis.ai.ui.theme.JarvisBackground
 import com.jarvis.ai.ui.theme.JarvisCyan
@@ -55,6 +58,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onLanguageSelected: (SpeechLanguage) -> Unit,
     onSpeakToggle: (Boolean) -> Unit,
+    onGeminiVoiceToggle: (Boolean) -> Unit,
     onSaveKey: (String) -> Unit,
     onClearKey: () -> Unit,
     onSaveModel: (String) -> Unit,
@@ -256,6 +260,31 @@ fun SettingsScreen(
             )
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = "Gemini ki awaaz", color = JarvisText, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = "Off: phone ki built-in awaaz (Hindi ya English, jo upar chuna ho). On: Gemini ki natural awaaz.",
+                    color = JarvisMuted,
+                    fontSize = 13.sp
+                )
+            }
+            Switch(
+                checked = ui.useGeminiVoice,
+                onCheckedChange = onGeminiVoiceToggle,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = JarvisBackground,
+                    checkedTrackColor = JarvisCyan
+                )
+            )
+        }
+
+        PhoneVoicePicker(ui.language)
+
         SectionTitle("Background use")
         Text(
             text = "Android stops microphone listening when the app is not on screen. Voice commands work while Jarvis is open. " +
@@ -360,6 +389,53 @@ private fun GroqSection() {
     }
     if (message.isNotBlank()) {
         Text(text = message, color = JarvisText, fontSize = 13.sp)
+    }
+}
+
+/** Lists the phone's installed voices for the chosen language. Pick the one you like. */
+@Composable
+private fun PhoneVoicePicker(language: SpeechLanguage) {
+    val context = LocalContext.current
+    var voices by remember(language) { mutableStateOf<List<String>?>(null) }
+    var picked by remember(language) { mutableStateOf(JarvisCore.settings().voiceName(language)) }
+
+    LaunchedEffect(language) {
+        PhoneVoices.list(context, language) { voices = it }
+    }
+
+    SectionTitle("Awaaz chuno (${language.label})")
+    val list = voices
+    when {
+        list == null -> Text(text = "Awaazein dhoondh raha hoon...", color = JarvisMuted, fontSize = 13.sp)
+        list.isEmpty() -> Text(
+            text = "Is bhasha ki koi awaaz phone par install nahi hai. Phone ki Text-to-speech settings mein Google ki awaaz download karein.",
+            color = JarvisMuted,
+            fontSize = 13.sp
+        )
+        else -> list.forEachIndexed { index, name ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .selectable(
+                        selected = picked == name,
+                        onClick = {
+                            picked = name
+                            JarvisCore.settings().setVoiceName(language, name)
+                        },
+                        role = Role.RadioButton
+                    )
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = picked == name,
+                    onClick = null,
+                    colors = RadioButtonDefaults.colors(selectedColor = JarvisCyan)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(text = "Awaaz ${index + 1}: $name", color = JarvisText, fontSize = 13.sp)
+            }
+        }
     }
 }
 
