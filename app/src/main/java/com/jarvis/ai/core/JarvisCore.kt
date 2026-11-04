@@ -84,8 +84,11 @@ object JarvisCore {
     private val BUILD_NO = Regex("nahi|nahin|\\bno\\b|cancel|नहीं|नही|रहने\\s*दो", RegexOption.IGNORE_CASE)
 
     /** A built app waiting for the user's "haan" before it is pushed to GitHub. */
-    private data class PendingBuild(val repo: String, val files: List<RepoFile>)
+    private data class PendingBuild(val repo: String, val files: List<RepoFile>, val wipeConfirmed: Boolean = false)
     private var pendingBuild: PendingBuild? = null
+
+    /** A build waiting for the user to allow deleting the files already in the repo. */
+    private var pendingWipe: PendingBuild? = null
 
     private val PLAN_TIMEOUT_MS = 28_000L
 
@@ -98,7 +101,9 @@ object JarvisCore {
         com.jarvis.ai.ai.ActionType.SWIPE,
         com.jarvis.ai.ai.ActionType.INPUT_TEXT,
         com.jarvis.ai.ai.ActionType.NAVIGATE_BACK,
-        com.jarvis.ai.ai.ActionType.GO_HOME
+        com.jarvis.ai.ai.ActionType.GO_HOME,
+        com.jarvis.ai.ai.ActionType.LAUNCH_APP,
+        com.jarvis.ai.ai.ActionType.OPEN_SETTINGS
     )
 
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
@@ -279,6 +284,19 @@ object JarvisCore {
             return "Theek hai, ab apna prompt bolein."
         }
 
+        pendingWipe?.let { b ->
+            // The repo already has files. Nothing is deleted until the user says yes to this question.
+            if (BUILD_YES.containsMatchIn(command)) {
+                pendingWipe = null
+                return commitBuild(b.copy(wipeConfirmed = true))
+            }
+            if (BUILD_NO.containsMatchIn(command)) {
+                pendingWipe = null
+                return "Theek hai, repo mein kuch delete nahi kiya aur kuch push nahi kiya."
+            }
+            return "Repo ki purani files delete karun? 'haan' ya 'nahi' bolein."
+        }
+
         pendingBuild?.let { b ->
             // Speech often comes back as "हाँ", "हां", "han" or "push karo", so all of these count as yes.
             if (BUILD_YES.containsMatchIn(command)) {
@@ -354,8 +372,18 @@ object JarvisCore {
         val token = GitHubStore(context).token()
             ?: return "GitHub token nahi mila. Settings mein dobara daalein."
         return try {
+            // Step 1: look at what is already in the repo. Nothing is changed yet.
+            val existing = withContext(Dispatchers.IO) { GitHubClient(token).listFiles(b.repo) }
+            if (existing.isNotEmpty() && !b.wipeConfirmed) {
+                pendingWipe = b
+                return "${b.repo} mein ${existing.size} purani files hain. Inhe delete karke naya app daalun? 'haan' bolein to sab purani files hata kar naya app push karunga."
+            }
+            // Step 2: only after a confirmed yes, remove the old files and push the new ones.
             withContext(Dispatchers.IO) {
                 val client = GitHubClient(token)
+                if (b.wipeConfirmed) {
+                    for ((path, sha) in existing) client.deleteFile(b.repo, path, sha, "Jarvis: remove old files")
+                }
                 for (file in b.files) client.putFile(b.repo, file, "Jarvis: build app")
             }
             // Watch the build in the background. If it fails, Jarvis fixes the files and pushes again.

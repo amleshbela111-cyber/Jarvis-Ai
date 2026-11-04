@@ -29,6 +29,10 @@ object LocalCommands {
     private val volume = Regex("\\b(volume|awaz)\\b")
     private val scrollDown = Regex("\\b(scroll down|neeche)\\b")
     private val scrollUp = Regex("\\b(scroll up|upar)\\b")
+    private val tapPrefix = Regex("^(?:tap|click|press|dabao|dabaao|daba do|dabado)\\s+(?:karo\\s+)?(.+)$")
+    private val tapSuffix = Regex(
+        "^(.+?)\\s+(?:par|pe|ko)?\\s*(?:tap|click|dabao|dabaao|daba do|dabado|dabaiye|press)(?:\\s+karo|\\s+kar do)?$"
+    )
     private val openPrefix = Regex("^(?:open|kholo|khol do|launch)\\s+(.+)$")
     private val openSuffix = Regex("^(.+?)\\s+(?:kholo|khol do|open karo|open)$")
 
@@ -52,6 +56,19 @@ object LocalCommands {
         if (volume.containsMatchIn(lower)) {
             val level = number.find(lower)?.value?.toIntOrNull()?.takeIf { it in 0..100 } ?: return null
             return action(ActionType.ADJUST_VOLUME, mapOf("level" to level.toString()))
+        }
+        // "Settings tap karo", "Gmail par click karo", "tap Login": tapped directly, with no Gemini call.
+        val tapLabel = tapPrefix.find(lower)?.groupValues?.get(1) ?: tapSuffix.find(lower)?.groupValues?.get(1)
+        if (tapLabel != null) {
+            val clean = tapLabel.trim().trimEnd('.', '!', '?')
+            if (clean.isNotEmpty() && clean.split(" ").size <= 4) {
+                return ValidatedPlan(
+                    ActionType.TAP.wire,
+                    listOf(ValidatedAction.Ready(ActionType.TAP, mapOf("target" to clean))),
+                    false,
+                    ""
+                )
+            }
         }
         if (scrollDown.containsMatchIn(lower)) return action(ActionType.SCROLL, mapOf("direction" to "down"))
         if (scrollUp.containsMatchIn(lower)) return action(ActionType.SCROLL, mapOf("direction" to "up"))

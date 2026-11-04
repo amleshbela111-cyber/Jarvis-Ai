@@ -10,8 +10,8 @@ import com.jarvis.ai.shizuku.ShizukuShell
 import kotlinx.coroutines.delay
 
 /**
- * Screen actions for voice commands. When Shizuku is connected, Jarvis uses it (no Accessibility needed).
- * Otherwise it uses the Accessibility service. Each action reports only what was confirmed.
+ * Screen actions for voice commands. The Accessibility service is tried first, because it reads the
+ * screen in memory and is fast. When it is not available, Shizuku is used. Each action reports only what was confirmed.
  */
 class AccessibilityActions(private val context: Context) {
 
@@ -35,12 +35,16 @@ class AccessibilityActions(private val context: Context) {
 
     /** Retries for a short time, because a newly opened app may still be drawing its screen. */
     suspend fun tap(label: String): Outcome {
-        if (shizukuOn()) return shizukuTap(label)
-        val service = JarvisAccessibilityService.instance ?: return notEnabled()
-        repeat(TAP_ATTEMPTS) { attempt ->
-            if (service.clickByLabel(label)) return Outcome(true, "Clicked \"$label\".")
-            if (attempt < TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
+        // The accessibility tree is read in memory, so it is tried first. Shizuku dumps the screen to a file, which is slower.
+        val service = JarvisAccessibilityService.instance
+        if (service != null) {
+            repeat(ACCESSIBILITY_TAP_ATTEMPTS) { attempt ->
+                if (service.clickByLabel(label)) return Outcome(true, "Clicked \"$label\".")
+                if (attempt < ACCESSIBILITY_TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
+            }
         }
+        if (shizukuOn()) return shizukuTap(label)
+        if (service == null) return notEnabled()
         return Outcome(false, "Could not find a clickable \"$label\" on screen. Screen par wo item dikh raha hai ya nahi, check karein.")
     }
 
@@ -120,13 +124,13 @@ class AccessibilityActions(private val context: Context) {
     // ---------- Shizuku paths ----------
 
     private suspend fun shizukuTap(label: String): Outcome {
-        repeat(TAP_ATTEMPTS) { attempt ->
+        repeat(SHIZUKU_TAP_ATTEMPTS) { attempt ->
             val node = dumpScreen()?.let { ScreenTree.find(it, label) }
             if (node != null) {
                 ShizukuShell.run("input tap ${node.cx} ${node.cy}")
                 return Outcome(true, "Clicked \"$label\".")
             }
-            if (attempt < TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
+            if (attempt < SHIZUKU_TAP_ATTEMPTS - 1) delay(TAP_RETRY_MS)
         }
         // Small text that the accessibility tree does not list (games, icons, custom views): look for it on the screenshot.
         val (width, _) = screenSize()
@@ -188,7 +192,8 @@ class AccessibilityActions(private val context: Context) {
 
     private companion object {
         const val MAX_READ_CHARS = 600
-        const val TAP_ATTEMPTS = 6
-        const val TAP_RETRY_MS = 500L
+        const val ACCESSIBILITY_TAP_ATTEMPTS = 3
+        const val SHIZUKU_TAP_ATTEMPTS = 2
+        const val TAP_RETRY_MS = 300L
     }
 }

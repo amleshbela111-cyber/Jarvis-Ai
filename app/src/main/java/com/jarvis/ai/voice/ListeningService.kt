@@ -53,6 +53,12 @@ class ListeningService : Service(), VoiceController.Listener {
     /** Until this time (ms), Jarvis is awake and takes commands without "Hey Jarvis". */
     private var awakeUntil = 0L
 
+    /**
+     * True once the user turns the mic on. The mic then stays on without cycling to the
+     * "Hey Jarvis" wake mode. Cleared only by pause, close, or stop.
+     */
+    private var continuous = false
+
     /** Offline "Hey Jarvis" listener (Vosk). Used only while Jarvis is asleep and a model is saved. */
     private var wake: WakeWordListener? = null
     private var wakeListening = false
@@ -77,20 +83,26 @@ class ListeningService : Service(), VoiceController.Listener {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun resumeListening() {
+        // A pause can cancel a half-finished Groq recording, which leaves this flag set. Clear it so the mic restarts.
+        sessionActive = false
+        continuous = true
         JarvisCore.setListening(true)
         beginListening()
     }
 
     private fun pauseListening() {
+        continuous = false
         JarvisCore.setListening(false)
         handler.removeCallbacks(restartRunnable)
         stopWake()
         netScope.coroutineContext.cancelChildren()
+        sessionActive = false
         voice.stopListening()
         JarvisCore.setVoiceState(JarvisState.IDLE, "Mic band hai. MIC dabakar dobara chalu karein.")
     }
 
     private fun stopEverything() {
+        continuous = false
         handler.removeCallbacks(restartRunnable)
         stopWake()
         voice.stopSpeaking()
@@ -108,7 +120,8 @@ class ListeningService : Service(), VoiceController.Listener {
             return
         }
         // Asleep and a model is saved: wait for "Hey Jarvis" offline. Google's recognizer stays closed (no beep).
-        if (System.currentTimeMillis() >= awakeUntil && VoskModelStore.isReady(this, "en")) {
+        // While continuous, the mic stays on and never drops into wake-word mode.
+        if (!continuous && System.currentTimeMillis() >= awakeUntil && VoskModelStore.isReady(this, "en")) {
             wakeListening = true
             JarvisCore.setVoiceState(JarvisState.IDLE, "\"Hey Jarvis\" bolein...")
             if (wake?.start() == true) return
@@ -212,12 +225,17 @@ class ListeningService : Service(), VoiceController.Listener {
         JarvisCore.setPartial("")
         val heard = text.trim()
 
+        if (PAUSE_TRIGGER.matches(heard)) {
+            pauseAndStop()
+            return
+        }
+
         if (CLOSE_TRIGGER.containsMatchIn(heard)) {
             closeJarvis()
             return
         }
 
-        val awake = System.currentTimeMillis() < awakeUntil
+        val awake = continuous || System.currentTimeMillis() < awakeUntil
         val command = if (awake) {
             heard
         } else {
@@ -240,11 +258,31 @@ class ListeningService : Service(), VoiceController.Listener {
         JarvisCore.submit(command) { reply, speak -> speakReply(reply, speak) }
     }
 
+    /**
+     * "Pause": stops the microphone, the offline wake word, and this background service, so the battery
+     * is not used. Turn Jarvis on again with the orb or the Quick Settings tile.
+     */
+    private fun pauseAndStop() {
+        handler.removeCallbacksAndMessages(null)
+        busy = false
+        sessionActive = false
+        continuous = false
+        awakeUntil = 0L
+        stopWake()
+        voice.stopListening()
+        voice.stopSpeaking()
+        JarvisCore.cancelCurrent()
+        JarvisCore.setListening(false)
+        JarvisCore.setVoiceState(JarvisState.IDLE, "Pause ho gaya. Chalu karne ke liye orb ya tile dabayein.")
+        stopSelf()
+    }
+
     /** "Close Jarvis": stops listening, closes the app screen, and ends this service. */
     private fun closeJarvis() {
         handler.removeCallbacksAndMessages(null)
         busy = false
         sessionActive = false
+        continuous = false
         awakeUntil = 0L
         stopWake()
         voice.stopListening()
@@ -338,6 +376,12 @@ class ListeningService : Service(), VoiceController.Listener {
 
         private val WAKE_TRIGGER = Regex(
             "(hey|hi|he|हे|हाय)\\s*,?\\s*(jarvis|jarwis|jarvish|javis|जार्विस|जारविस|जार्वीस)",
+            RegexOption.IGNORE_CASE
+        )
+        /** A short command that is only "pause" (optionally with "Jarvis" and "karo"). */
+        private val PAUSE_TRIGGER = Regex(
+            "^(?:(?:hey|hi|he)\\s*,?\\s*)?(?:jarvis|jarwis|जार्विस|जारविस)?\\s*" +
+                "(?:pause|पॉज़?|ruko|रुको|roko|रोको|stop listening)\\s*(?:karo|kar do|करो)?\\s*[.!]?$",
             RegexOption.IGNORE_CASE
         )
         private val CLOSE_TRIGGER = Regex(

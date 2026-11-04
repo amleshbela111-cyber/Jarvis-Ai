@@ -28,6 +28,45 @@ class GitHubClient(private val token: String) {
         if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
     }
 
+    /** Deletes [path] from "owner/repo". [sha] is the file's blob sha, as [listFiles] returns it. */
+    fun deleteFile(ownerRepo: String, path: String, sha: String, message: String) {
+        val body = JSONObject().put("message", message).put("sha", sha)
+        val (code, text) = request("DELETE", ownerRepo, path, body.toString())
+        if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+    }
+
+    /**
+     * Every file in the repo's default branch, as (path, blob sha) pairs. An empty repo gives an empty list.
+     */
+    fun listFiles(ownerRepo: String): List<Pair<String, String>> {
+        val url = URL("https://api.github.com/repos/$ownerRepo/git/trees/HEAD?recursive=1")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10_000
+            readTimeout = 30_000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        }
+        try {
+            val code = connection.responseCode
+            // 404 and 409 mean the repo has no commits yet, so there is nothing to list.
+            if (code == 404 || code == 409) return emptyList()
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) throw IOException("GitHub ${code}: ${text.take(160)}")
+            val tree = JSONObject(text).optJSONArray("tree") ?: return emptyList()
+            val files = mutableListOf<Pair<String, String>>()
+            for (i in 0 until tree.length()) {
+                val item = tree.getJSONObject(i)
+                if (item.optString("type") == "blob") files += item.getString("path") to item.getString("sha")
+            }
+            return files
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     /** Returns the blob sha of an existing file, or null when the file does not exist yet. */
     private fun existingSha(ownerRepo: String, path: String): String? {
         val (code, text) = request("GET", ownerRepo, path, null)

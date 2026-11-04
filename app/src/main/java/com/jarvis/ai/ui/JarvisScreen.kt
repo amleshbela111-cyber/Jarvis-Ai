@@ -6,6 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,9 +103,8 @@ fun JarvisApp(viewModel: JarvisViewModel) {
         viewModel.setMicPermission(granted)
     }
 
-    LaunchedEffect(ui.micPermissionGranted) {
-        if (ui.micPermissionGranted) ListeningService.start(context, ListeningService.ACTION_RESUME)
-    }
+    // Listening no longer starts when the app opens, so the battery is not used until Jarvis is turned on
+    // (with the mic button, the orb, or the Quick Settings tile).
 
     LifecycleResumeEffect(Unit) {
         viewModel.refreshDevicePermissions()
@@ -172,6 +175,7 @@ private fun JarvisHome(
     onStop: () -> Unit
 ) {
     val listState = rememberLazyListState()
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
     val showUpdate by UpdateFlow.panelVisible.collectAsState()
     val neuralAnswer by NeuralView.answer.collectAsState()
     LaunchedEffect(ui.messages.size) {
@@ -195,11 +199,39 @@ private fun JarvisHome(
                 fontWeight = FontWeight.Bold,
                 fontSize = 22.sp
             )
-            TextButton(onClick = onOpenSetup) {
-                Text("SETUP", color = JarvisMuted)
-            }
-            TextButton(onClick = onOpenSettings) {
-                Text("SETTINGS", color = JarvisMuted)
+            // Three lines at the top right. Tapping them opens the menu with Settings and Setup.
+            Box {
+                Column(
+                    modifier = Modifier
+                        .clickable { menuOpen = true }
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    repeat(3) {
+                        Box(
+                            modifier = Modifier
+                                .width(22.dp)
+                                .height(2.dp)
+                                .background(JarvisCyan)
+                        )
+                    }
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenSettings()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Setup") },
+                        onClick = {
+                            menuOpen = false
+                            onOpenSetup()
+                        }
+                    )
+                }
             }
         }
 
@@ -207,6 +239,12 @@ private fun JarvisHome(
         StatusRow(ui)
         Spacer(Modifier.height(12.dp))
 
+        // The orb and its status sit in the middle of the free space.
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
         if (neuralAnswer != null) {
             NeuralGraph(state = ui.state, soundLevel = ui.soundLevel)
             Text(
@@ -224,7 +262,11 @@ private fun JarvisHome(
                 Text("ORB PAR LAUT CHALO", color = JarvisMuted)
             }
         } else {
-            JarvisHud(state = ui.state, soundLevel = ui.soundLevel)
+            JarvisHud(
+                state = ui.state,
+                soundLevel = ui.soundLevel,
+                onTap = onMicClick
+            )
         }
 
         Spacer(Modifier.height(8.dp))
@@ -242,12 +284,13 @@ private fun JarvisHome(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
         }
+        }
 
         Spacer(Modifier.height(12.dp))
 
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = Modifier.heightIn(max = 220.dp).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(ui.messages, key = { it.id }) { message ->
@@ -258,20 +301,6 @@ private fun JarvisHome(
         if (showUpdate) UpdatePanel()
 
         Spacer(Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            OutlinedButton(
-                onClick = onStop,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError)
-            ) {
-                Text("STOP")
-            }
-            MicButton(state = ui.state, listening = ui.listening, onClick = onMicClick)
-        }
     }
 }
 

@@ -26,7 +26,7 @@ object GroqSpeech {
     private const val LOUD_PEAK = 1500
 
     /** Records until the speaker has been quiet for [silenceMs], or [maxMs] has passed. Null when nothing was said. */
-    fun recordUtterance(maxMs: Long = 12_000L, silenceMs: Long = 1_200L): ByteArray? {
+    fun recordUtterance(maxMs: Long = 12_000L, silenceMs: Long = 900L): ByteArray? {
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuffer <= 0) return null
         val recorder = AudioRecord(

@@ -3,6 +3,7 @@ package com.jarvis.ai.ui
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,7 +49,7 @@ private val HudAlarm = Color(0xFFFF3B30)
  * when Jarvis listens or speaks (faster still when thinking), with the voice level driving the change.
  */
 @Composable
-fun JarvisHud(state: JarvisState, soundLevel: Float, modifier: Modifier = Modifier) {
+fun JarvisHud(state: JarvisState, soundLevel: Float, modifier: Modifier = Modifier, onTap: () -> Unit = {}) {
     val active = state == JarvisState.LISTENING || state == JarvisState.SPEAKING ||
         state == JarvisState.THINKING || state == JarvisState.EXECUTING
     val busy = state == JarvisState.THINKING || state == JarvisState.EXECUTING
@@ -87,31 +88,24 @@ fun JarvisHud(state: JarvisState, soundLevel: Float, modifier: Modifier = Modifi
         }
     }
 
-    Box(modifier = modifier.size(300.dp), contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.matchParentSize().scale(scale)) {
+    Box(
+        modifier = modifier
+            .size(300.dp)
+            .clickable(onClick = onTap),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().scale(scale)) {
             drawHud(angle = angle, level = level, color = color)
         }
-        Column(
-            modifier = Modifier.fillMaxSize().padding(bottom = 22.dp),
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "JARVIS",
-                color = color,
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp,
-                letterSpacing = 4.sp,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "YOUR AI ASSISTANT",
-                color = HudBlue.copy(alpha = 0.85f),
-                fontSize = 9.sp,
-                letterSpacing = 2.sp,
-                textAlign = TextAlign.Center
-            )
-        }
+        // The name sits in the middle of the blue ball, with dots between the letters.
+        Text(
+            text = "J.A.R.V.I.S.",
+            color = HudWhite,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp,
+            letterSpacing = 1.sp,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -132,9 +126,17 @@ private fun DrawScope.drawHud(angle: Float, level: Float, color: Color) {
         blendMode = BlendMode.Plus
     )
 
-    // Outer thick segmented ring.
-    rotate(degrees = angle * 0.5f, pivot = c) {
-        arcRing(c, r * 0.98f, 6, 40f, r * 0.022f, color)
+    // Concentric rings, one after another outward. Each ring breaks into more pieces and fades out.
+    for (i in 0 until 6) {
+        val radius = r * (0.56f + i * 0.075f)
+        val pieces = 3 + i * 3
+        val sweep = 360f / pieces * 0.55f
+        val alpha = (1f - i * 0.14f).coerceAtLeast(0.2f)
+        val direction = if (i % 2 == 0) 1f else -1f
+        val width = (thin * (6f - i * 0.6f)).coerceAtLeast(thin * 1.2f)
+        rotate(degrees = angle * (0.4f + i * 0.1f) * direction, pivot = c) {
+            arcRing(c, radius, pieces, sweep, width, color.copy(alpha = alpha))
+        }
     }
     // Thin outer circle.
     drawCircle(color = color.copy(alpha = 0.5f), radius = r * 0.90f, center = c, style = Stroke(width = thin * 2f))
@@ -166,38 +168,32 @@ private fun DrawScope.drawHud(angle: Float, level: Float, color: Color) {
         )
     }
 
-    // Inner segmented ring, turning faster the other way.
-    rotate(degrees = -angle * 1.2f, pivot = c) {
-        arcRing(c, r * 0.70f, 12, 22f, r * 0.03f, HudDeep)
-    }
 
-    // Thin inner circle with a few bright arcs.
-    rotate(degrees = angle * 0.8f, pivot = c) {
-        arcRing(c, r * 0.60f, 3, 60f, thin * 4f, HudWhite)
-    }
-
-    // Core: a glowing visor with two bright eyes. An original design, not a copy of any character.
-    val coreW = r * 0.46f * (1f + level * 0.08f)
-    val coreH = r * 0.28f * (1f + level * 0.08f)
+    // Blue 3D ball in the centre: lit from the top-left, shaded toward black at the bottom.
+    val ballR = r * 0.42f * (1f + level * 0.06f)
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(color.copy(alpha = 0.55f), Color.Transparent),
-            center = c,
-            radius = r * 0.45f
+            colors = listOf(Color(0xFF9FEBFF), color, HudDeep),
+            center = Offset(c.x - ballR * 0.3f, c.y - ballR * 0.35f),
+            radius = ballR * 1.6f
         ),
-        radius = r * 0.45f,
-        center = c,
-        blendMode = BlendMode.Plus
+        radius = ballR,
+        center = c
     )
-    drawRoundRect(
-        brush = Brush.verticalGradient(listOf(HudWhite, color, HudDeep)),
-        topLeft = Offset(c.x - coreW / 2f, c.y - coreH / 2f - r * 0.04f),
-        size = Size(coreW, coreH),
-        cornerRadius = CornerRadius(coreH / 2f, coreH / 2f)
+    drawCircle(
+        brush = Brush.verticalGradient(
+            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f)),
+            startY = c.y - ballR * 0.1f,
+            endY = c.y + ballR
+        ),
+        radius = ballR,
+        center = c
     )
-    val eyeY = c.y - r * 0.04f
-    drawCircle(color = Color.White, radius = r * 0.03f, center = Offset(c.x - coreW * 0.22f, eyeY))
-    drawCircle(color = Color.White, radius = r * 0.03f, center = Offset(c.x + coreW * 0.22f, eyeY))
+    // Two very thin rings inside the ball, turning slowly.
+    rotate(degrees = angle * 0.7f, pivot = c) {
+        drawCircle(color = HudWhite.copy(alpha = 0.55f), radius = ballR * 0.78f, center = c, style = Stroke(width = thin * 1.2f))
+        drawCircle(color = HudWhite.copy(alpha = 0.35f), radius = ballR * 0.56f, center = c, style = Stroke(width = thin * 1.2f))
+    }
 
     // Voice ring: expands with the sound level.
     if (level > 0f) {

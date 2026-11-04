@@ -71,7 +71,6 @@ fun SettingsScreen(
 ) {
     var keyInput by remember { mutableStateOf("") }
     var modelInput by remember { mutableStateOf(ui.geminiModel) }
-    val log by ActivityLog.entries.collectAsState()
 
     Column(
         modifier = Modifier
@@ -142,21 +141,6 @@ fun SettingsScreen(
                     checkedTrackColor = JarvisError
                 )
             )
-        }
-
-        SectionTitle("Activity log")
-        if (log.isEmpty()) {
-            Text(text = "No actions yet.", color = JarvisMuted, fontSize = 13.sp)
-        } else {
-            val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-            log.take(20).forEach { entry ->
-                Text(
-                    text = "${timeFormat.format(Date(entry.timeMillis))}  ${entry.action}  " +
-                        "${if (entry.success) "OK" else "FAILED"}: ${entry.message}",
-                    color = if (entry.success) JarvisText else JarvisMuted,
-                    fontSize = 12.sp
-                )
-            }
         }
 
         SectionTitle("Gemini brain")

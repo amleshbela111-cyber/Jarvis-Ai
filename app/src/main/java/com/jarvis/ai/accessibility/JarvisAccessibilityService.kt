@@ -59,9 +59,10 @@ class JarvisAccessibilityService : AccessibilityService() {
             }
             val target = matches.getOrNull(ordinal) ?: return@withNodes OUTCOME_NOT_FOUND
             val clickable = clickableAncestorOrSelf(target)
-            if (clickable != null && clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                return@withNodes OUTCOME_CLICKED
-            }
+            val clicked = clickable?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true
+            // A parent found by the walk is ours to recycle. The target itself is recycled by withNodes.
+            if (clickable != null && clickable !== target) clickable.recycle()
+            if (clicked) return@withNodes OUTCOME_CLICKED
             target.getBoundsInScreen(bounds)
             OUTCOME_NEEDS_TAP
         }
@@ -134,8 +135,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val wanted = target?.trim().orEmpty()
         val node = (
             if (wanted.isEmpty()) {
-                rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                    ?: nodes.firstOrNull { it.isEditable && it.isFocused && it.isVisibleToUser }
+                nodes.firstOrNull { it.isEditable && it.isFocused && it.isVisibleToUser }
             } else {
                 nodes.firstOrNull { it.isEditable && it.isVisibleToUser && labelMatches(it, wanted) }
             }
@@ -238,13 +238,18 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     /** Walks up a few levels to find the element that actually receives clicks. */
     private fun clickableAncestorOrSelf(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        var current: AccessibilityNodeInfo? = node
+        if (node.isClickable) return node
+        var current: AccessibilityNodeInfo = node
         var depth = 0
-        while (current != null && depth < MAX_PARENT_DEPTH) {
-            if (current.isClickable) return current
-            current = current.parent
+        while (depth < MAX_PARENT_DEPTH) {
+            val parent = current.parent ?: return null
+            // Every node this walk gets is recycled, except the one returned to the caller.
+            if (current !== node) current.recycle()
+            if (parent.isClickable) return parent
+            current = parent
             depth++
         }
+        if (current !== node) current.recycle()
         return null
     }
 

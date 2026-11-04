@@ -259,13 +259,12 @@ class VoiceController(
         mainHandler.postDelayed(unmuteBeep, BEEP_MUTE_MS)
     }
 
-    // Some phones play the mic start/stop beep on the media stream, so that one is muted too.
-    // It is muted only briefly around listening, and only if it was not already muted.
+    // The mic start/stop beep plays on the system and notification streams. The media stream is NOT muted here,
+    // because muting it silenced YouTube Shorts and other music every time Jarvis started listening.
     private val beepStreams = intArrayOf(
         AudioManager.STREAM_SYSTEM,
         AudioManager.STREAM_NOTIFICATION,
-        AudioManager.STREAM_RING,
-        AudioManager.STREAM_MUSIC
+        AudioManager.STREAM_RING
     )
     private val mutedByUs = mutableSetOf<Int>()
 
