@@ -16,8 +16,8 @@ android {
             // Modern phones are 64-bit ARM. One ABI keeps the APK small.
             abiFilters += listOf("arm64-v8a")
         }
-        versionCode = 43
-        versionName = "2.10.0"
+        versionCode = 44
+        versionName = "2.10.1"
     }
 
     buildTypes {
@@ -52,6 +52,7 @@ dependencies {
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")

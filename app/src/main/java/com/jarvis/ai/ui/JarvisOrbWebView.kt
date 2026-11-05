@@ -5,9 +5,12 @@ import android.graphics.Color as AndroidColor
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.size
+import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewClientCompat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -62,12 +65,18 @@ fun JarvisOrbWebView(
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = true
                 addJavascriptInterface(OrbBridge { tapHandler.post { currentOnTap() } }, "AndroidOrb")
-                webViewClient = object : WebViewClient() {
+                val loader = WebViewAssetLoader.Builder()
+                    .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+                    .build()
+                webViewClient = object : WebViewClientCompat() {
+                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
+                        loader.shouldInterceptRequest(request.url)
+
                     override fun onPageFinished(view: WebView?, url: String?) {
                         pageReady = true
                     }
                 }
-                loadUrl("file:///android_asset/orb.html")
+                loadUrl("https://appassets.androidplatform.net/assets/orb.html")
                 webView = this
             }
         }
