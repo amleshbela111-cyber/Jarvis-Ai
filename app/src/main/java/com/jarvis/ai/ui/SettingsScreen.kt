@@ -158,6 +158,7 @@ fun SettingsScreen(
             colors = jarvisFieldColors(),
             modifier = Modifier.fillMaxWidth()
         )
+        OpenLinkButton("Gemini API key yahan se lein", SettingsLinks.GEMINI_KEY)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
@@ -190,6 +191,7 @@ fun SettingsScreen(
             colors = jarvisFieldColors(),
             modifier = Modifier.fillMaxWidth()
         )
+        OpenLinkButton("Gemini models ki list yahan dekhein", SettingsLinks.GEMINI_MODELS)
         Button(
             onClick = { onSaveModel(modelInput) },
             colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
@@ -342,6 +344,7 @@ private fun GroqSection() {
         colors = jarvisFieldColors(),
         modifier = Modifier.fillMaxWidth()
     )
+    OpenLinkButton("Groq API key yahan se lein", SettingsLinks.GROQ_KEY)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
             onClick = {

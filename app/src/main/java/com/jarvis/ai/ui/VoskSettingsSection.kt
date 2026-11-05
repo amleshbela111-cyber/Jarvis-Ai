@@ -55,6 +55,7 @@ fun VoskSection() {
         color = JarvisMuted,
         fontSize = 13.sp
     )
+    OpenLinkButton("Vosk model yahan se download karein", SettingsLinks.VOSK_MODELS)
     Column(modifier = Modifier.fillMaxWidth()) {
         Button(
             onClick = {

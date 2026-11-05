@@ -57,6 +57,7 @@ fun GitHubSection() {
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth()
     )
+    OpenLinkButton("GitHub token yahan se banayein", SettingsLinks.GITHUB_TOKEN)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
             onClick = {

@@ -1,6 +1,7 @@
 package com.jarvis.ai.github
 
 import android.util.Base64
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -62,6 +63,81 @@ class GitHubClient(private val token: String) {
                 if (item.optString("type") == "blob") files += item.getString("path") to item.getString("sha")
             }
             return files
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    /**
+     * Makes the default branch hold exactly [files] in ONE commit. Files that are not in [files] are removed.
+     * Uses the Git Data API, so there is no per-file delete and no per-file commit.
+     */
+    fun replaceAll(ownerRepo: String, files: List<RepoFile>, message: String) {
+        val branch = defaultBranch(ownerRepo)
+        val headSha = currentHead(ownerRepo, branch)
+
+        val tree = JSONArray()
+        for (file in files) {
+            val blob = JSONObject().put("content", file.content).put("encoding", "utf-8")
+            val blobSha = gitCall("POST", "$ownerRepo/git/blobs", blob.toString()).getString("sha")
+            tree.put(JSONObject().put("path", file.path).put("mode", "100644").put("type", "blob").put("sha", blobSha))
+        }
+        // No base_tree: the new tree contains only the new files, so old files are dropped in this commit.
+        val treeSha = gitCall("POST", "$ownerRepo/git/trees", JSONObject().put("tree", tree).toString()).getString("sha")
+
+        val parents = JSONArray().apply { if (headSha != null) put(headSha) }
+        val commitBody = JSONObject().put("message", message).put("tree", treeSha).put("parents", parents)
+        val commitSha = gitCall("POST", "$ownerRepo/git/commits", commitBody.toString()).getString("sha")
+
+        if (headSha == null) {
+            gitCall("POST", "$ownerRepo/git/refs", JSONObject().put("ref", "refs/heads/$branch").put("sha", commitSha).toString())
+        } else {
+            gitCall("PATCH", "$ownerRepo/git/refs/heads/$branch", JSONObject().put("sha", commitSha).put("force", true).toString())
+        }
+    }
+
+    private fun defaultBranch(ownerRepo: String): String {
+        val repo = gitCall("GET", ownerRepo, null)
+        return repo.optString("default_branch").ifBlank { "main" }
+    }
+
+    /** The commit sha the branch points to, or null for an empty repo. */
+    private fun currentHead(ownerRepo: String, branch: String): String? {
+        val (code, text) = retried { request2("GET", "$ownerRepo/git/ref/heads/$branch", null) }
+        if (code == 404 || code == 409) return null
+        if (code !in 200..299) throw IOException("GitHub $code reading branch: ${text.take(160).ifBlank { "server error, try again" }}")
+        return JSONObject(text).getJSONObject("object").getString("sha")
+    }
+
+    /** One Git Data API call. Returns the JSON body; throws with the path when GitHub refuses. */
+    private fun gitCall(method: String, path: String, body: String?): JSONObject {
+        val (code, text) = retried { request2(method, path, body) }
+        if (code !in 200..299) {
+            throw IOException("GitHub $code on ${path.substringAfter("/git/").ifBlank { "repo" }}: ${text.take(160).ifBlank { "server error, try again" }}")
+        }
+        return JSONObject(text)
+    }
+
+    private fun request2(method: String, path: String, body: String?): Pair<Int, String> {
+        val url = URL("https://api.github.com/repos/$path")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            connectTimeout = 10_000
+            readTimeout = 30_000
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            if (body != null) {
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+            }
+        }
+        try {
+            if (body != null) connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            return code to text
         } finally {
             connection.disconnect()
         }

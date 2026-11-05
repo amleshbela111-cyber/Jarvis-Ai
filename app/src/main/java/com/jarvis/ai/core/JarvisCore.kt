@@ -90,7 +90,8 @@ object JarvisCore {
     /** A build waiting for the user to allow deleting the files already in the repo. */
     private var pendingWipe: PendingBuild? = null
 
-    private val PLAN_TIMEOUT_MS = 28_000L
+    // The whole plan step, including one retry or the fallback model, must fit in this time.
+    private val PLAN_TIMEOUT_MS = 40_000L
 
     /** Building a whole app takes longer than a normal answer. */
     private val BUILD_TIMEOUT_MS = 150_000L
@@ -188,6 +189,10 @@ object JarvisCore {
         return when {
             error is java.net.SocketTimeoutException || "timeout" in text || "timed out" in text ->
                 "Jawab mein thoda time lag gaya. Ek baar phir bolein."
+            "429" in text || "quota" in text || "resource_exhausted" in text ->
+                "Gemini ki aaj ki limit khatam ho gayi hai. Thodi der baad bolein."
+            "500" in text || "502" in text || "503" in text || "504" in text || "unavailable" in text ->
+                "Gemini abhi busy hai. Thodi der baad phir bolein."
             "404" in text || "no longer available" in text ->
                 "Gemini model update hona chahiye. Settings mein model check karein."
             "400" in text || "401" in text || "403" in text || "api key" in text ->
@@ -397,13 +402,10 @@ object JarvisCore {
                 pendingWipe = b
                 return "${b.repo} mein ${existing.size} purani files hain. Inhe delete karke naya app daalun? 'haan' bolein to sab purani files hata kar naya app push karunga."
             }
-            // Step 2: only after a confirmed yes, remove the old files and push the new ones.
+            // Step 2: only after a confirmed yes (or when the repo was empty), make the repo hold exactly the new app
+            // in one commit. Old files are dropped by that same commit, so there is no per-file delete.
             withContext(Dispatchers.IO) {
-                val client = GitHubClient(token)
-                if (b.wipeConfirmed) {
-                    for ((path, sha) in existing) client.deleteFile(b.repo, path, sha, "Jarvis: remove old files")
-                }
-                for (file in b.files) client.putFile(b.repo, file, "Jarvis: build app")
+                GitHubClient(token).replaceAll(b.repo, b.files, "Jarvis: build app")
             }
             // Watch the build in the background. If it fails, Jarvis fixes the files and pushes again.
             val pushedAt = System.currentTimeMillis()

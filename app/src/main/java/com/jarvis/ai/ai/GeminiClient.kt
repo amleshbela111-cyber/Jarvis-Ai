@@ -1,6 +1,7 @@
 package com.jarvis.ai.ai
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,19 +26,38 @@ class GeminiClient {
         expectJson: Boolean = true,
         maxTokens: Int = MAX_OUTPUT_TOKENS
     ): String = withContext(Dispatchers.IO) {
-        try {
-            callOnce(apiKey, model, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens, primaryReadMs(maxTokens))
-        } catch (e: IOException) {
-            // Only retry on network timeouts, not on errors such as a retired model (404) or bad key.
-            val retryable = e is java.net.SocketTimeoutException || e is java.net.ConnectException
-            if (model == FALLBACK_MODEL || !retryable) throw e
-            callOnce(apiKey, FALLBACK_MODEL, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens, primaryReadMs(maxTokens))
+        var lastError: IOException? = null
+        // First the chosen model, then the fallback. Each gets a second try when the failure is temporary.
+        for (candidate in listOf(model, FALLBACK_MODEL).distinct()) {
+            for (attempt in 1..2) {
+                try {
+                    return@withContext callOnce(
+                        apiKey, candidate, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens,
+                        readMs(maxTokens, candidate)
+                    )
+                } catch (e: IOException) {
+                    lastError = e
+                    if (!isTemporary(e)) break
+                    if (attempt == 1) delay(RETRY_WAIT_MS)
+                }
+            }
         }
+        throw lastError ?: IOException("Gemini did not answer")
+    }
+
+    /** Timeouts, busy servers (429, 500, 502, 503, 504) and dropped connections are worth one more try. */
+    private fun isTemporary(e: IOException): Boolean {
+        if (e is java.net.SocketTimeoutException || e is java.net.ConnectException) return true
+        val text = e.message.orEmpty()
+        return TEMPORARY_CODES.any { text.startsWith("Gemini error $it") }
     }
 
     /** Large outputs (whole app builds) need more time to arrive than a short voice reply. */
-    private fun primaryReadMs(maxTokens: Int): Int =
-        if (maxTokens > MAX_OUTPUT_TOKENS) LONG_READ_MS else PRIMARY_READ_MS
+    private fun readMs(maxTokens: Int, candidate: String): Int = when {
+        maxTokens > MAX_OUTPUT_TOKENS -> LONG_READ_MS
+        candidate == FALLBACK_MODEL -> FALLBACK_READ_MS
+        else -> PRIMARY_READ_MS
+    }
 
     private fun callOnce(
         apiKey: String,
@@ -131,9 +151,11 @@ class GeminiClient {
         const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
         const val FALLBACK_MODEL = "gemini-3.6-flash"
         const val CONNECT_TIMEOUT_MS = 8_000
-        const val PRIMARY_READ_MS = 12_000
-        const val FALLBACK_READ_MS = 12_000
+        const val PRIMARY_READ_MS = 15_000
+        const val FALLBACK_READ_MS = 15_000
         const val LONG_READ_MS = 90_000
+        const val RETRY_WAIT_MS = 1_200L
         const val MAX_OUTPUT_TOKENS = 2048
+        val TEMPORARY_CODES = listOf(429, 500, 502, 503, 504)
     }
 }
