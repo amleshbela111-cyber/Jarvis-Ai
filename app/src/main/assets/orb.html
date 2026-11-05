@@ -22,6 +22,25 @@ canvas{
 }
 </style>
 
+<div id="orbErr" style="display:none;position:fixed;left:8px;right:8px;top:8px;z-index:9;color:#ffb070;background:rgba(0,0,0,.7);font:12px monospace;padding:8px;white-space:pre-wrap"></div>
+<script>
+function orbShowError(msg){
+  var e=document.getElementById("orbErr");
+  if(e){ e.style.display="block"; e.textContent=msg; }
+}
+window.addEventListener("error",function(ev){
+  orbShowError("Orb error: "+(ev.message||"unknown")+" ("+(ev.filename||"")+")");
+});
+window.addEventListener("unhandledrejection",function(ev){
+  orbShowError("Orb promise error: "+(ev.reason&&ev.reason.message?ev.reason.message:ev.reason));
+});
+// If the 3D module never starts, say so instead of showing a blank screen.
+setTimeout(function(){
+  if(!window.jarvisReady){
+    orbShowError("Orb start nahi hua. Three.js files (assets/three) check karein.");
+  }
+},4000);
+</script>
 <script type="importmap">
 {
   "imports":{
@@ -475,6 +494,7 @@ function animate(){
 }
 
 animate();
+window.jarvisReady=true;
 
 // ==================================
 // RESIZE
