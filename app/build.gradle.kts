@@ -16,8 +16,8 @@ android {
             // Modern phones are 64-bit ARM. One ABI keeps the APK small.
             abiFilters += listOf("arm64-v8a")
         }
-        versionCode = 42
-        versionName = "2.9.1"
+        versionCode = 43
+        versionName = "2.10.0"
     }
 
     buildTypes {
