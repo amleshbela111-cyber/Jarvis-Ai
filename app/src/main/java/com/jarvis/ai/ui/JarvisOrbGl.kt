@@ -42,7 +42,7 @@ fun JarvisOrbGl(
 ) {
     val currentOnTap by rememberUpdatedState(onTap)
     AndroidView(
-        modifier = modifier.size(340.dp),
+        modifier = modifier.size(300.dp),
         factory = { ctx ->
             OrbGlView(ctx).apply { onTapCallback = { currentOnTap() } }
         },
@@ -130,12 +130,13 @@ private object M {
 // ---------- colours (same hex values as the original) ----------
 private fun hex(h: Int): FloatArray = floatArrayOf(((h shr 16) and 255) / 255f, ((h shr 8) and 255) / 255f, (h and 255) / 255f)
 
-private val C_ORANGE = hex(0xA9430B)
-private val C_ORANGE_DARK = hex(0x652407)
-private val C_ORANGE_GLOW = hex(0xC65A12)
-private val C_GOLD = hex(0x986019)
-private val C_CORE = hex(0xA84C10)
-private val C_PARTICLE = hex(0xA95A16)
+private val C_ORANGE = hex(0xFF6A12)
+private val C_ORANGE_DARK = hex(0xB8430C)
+private val C_ORANGE_GLOW = hex(0xFF8A2A)
+private val C_GOLD = hex(0xFFB344)
+private val C_CORE = hex(0xFF7A1E)
+private val C_PARTICLE = hex(0xFF9A3A)
+private val C_CORE_HOT = hex(0xFFF0C0)
 
 // ---------- shaders (same as the WebGL version) ----------
 private const val VS_MESH = """
@@ -144,9 +145,11 @@ uniform mat4 uMV;
 uniform mat4 uProj;
 uniform float uPointSize;
 uniform float uPxScale;
+varying float vFade;
 void main(){
   vec4 p = uMV * vec4(aPos, 1.0);
   gl_Position = uProj * p;
+  vFade = clamp(1.0 - (-p.z - 7.5) * 0.3, 0.3, 1.0);
   gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
 }
 """
@@ -155,8 +158,9 @@ private const val FS_MESH = """
 precision mediump float;
 uniform vec4 uColor;
 uniform float uRound;
+varying float vFade;
 void main(){
-  float a = uColor.a;
+  float a = uColor.a * vFade;
   if (uRound > 0.5) {
     float r = length(gl_PointCoord - 0.5) * 2.0;
     if (r > 1.0) discard;
@@ -493,36 +497,30 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         quadG = makeGeo(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f), null, 4)
 
         rings = listOf(
-            Ring(torusGeo(1.12f, 0.018f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
-            Ring(torusGeo(1.28f, 0.023f, 16, 300, (PI * 2).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, 0.1f),
-            Ring(torusGeo(1.52f, 0.027f, 16, 300, (PI * 1.52).toFloat()), floatArrayOf(1.35f, 0.4f, 0.7f), C_ORANGE, 0.12f),
-            Ring(torusGeo(1.62f, 0.019f, 16, 300, (PI * 1.65).toFloat()), floatArrayOf(0.85f, 1.35f, 0.15f), C_GOLD, -0.09f),
-            Ring(torusGeo(1.38f, 0.014f, 16, 300, (PI * 1.3).toFloat()), floatArrayOf(1.6f, 0.8f, 1f), C_ORANGE_DARK, 0.16f)
+            Ring(torusGeo(1.12f, 0.02f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
+            Ring(torusGeo(1.36f, 0.026f, 16, 300, (PI * 1.6).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, -0.09f),
+            Ring(torusGeo(1.58f, 0.032f, 16, 300, (PI * 1.3).toFloat()), floatArrayOf(1.35f, 0.4f, 0.7f), C_ORANGE, 0.12f)
         )
 
         // Inner wireframe: 24 great circles spread evenly, plus 7 latitude rings.
         val sr = 0.76f
         val list = ArrayList<Strand>()
-        // Latitude and longitude lines: every meridian crosses every parallel at 90 degrees, as in the reference.
-        for (m in 0 until 12) {
-            val phi = m * PI.toFloat() / 12f
-            val pts = ArrayList<FloatArray>()
-            for (j in 0 until 240) {
-                val a = j.toFloat() / 240f * PI.toFloat() * 2f
-                pts.add(floatArrayOf(sr * sin(a) * cos(phi), sr * cos(a), sr * sin(a) * sin(phi)))
-            }
-            list.add(Strand(tubeGeo(pts, true, 0.008f), if (m % 2 == 0) C_GOLD else C_ORANGE_GLOW, 0.85f))
-        }
-        for (i in 1..7) {
-            val lat = i.toFloat() / 8f * PI.toFloat()
+        // Latitude circles around the Y axis, and the same circles around the X axis.
+        // Every circle of one set crosses every circle of the other at 90 degrees. No poles.
+        val parallels = 27
+        for (k in 1..parallels) {
+            val lat = k.toFloat() / (parallels + 1) * PI.toFloat()
             val r = sr * sin(lat)
-            val yy = sr * cos(lat)
-            val pts = ArrayList<FloatArray>()
+            val h = sr * cos(lat)
+            val ptsY = ArrayList<FloatArray>()
+            val ptsX = ArrayList<FloatArray>()
             for (j in 0 until 240) {
-                val aa = j.toFloat() / 240f * PI.toFloat() * 2f
-                pts.add(floatArrayOf(r * cos(aa), yy, r * sin(aa)))
+                val ang = j.toFloat() / 240f * PI.toFloat() * 2f
+                ptsY.add(floatArrayOf(r * cos(ang), h, r * sin(ang)))
+                ptsX.add(floatArrayOf(h, r * cos(ang), r * sin(ang)))
             }
-            list.add(Strand(tubeGeo(pts, true, 0.005f), C_ORANGE_GLOW, 0.72f))
+            list.add(Strand(tubeGeo(ptsY, true, 0.0045f), C_GOLD, 0.85f))
+            list.add(Strand(tubeGeo(ptsX, true, 0.0045f), C_ORANGE_GLOW, 0.85f))
         }
         strands = list
 
@@ -530,7 +528,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val bl = ArrayList<Beam>()
         for (i in 0 until 16) {
             val angle = i * PI.toFloat() * 2f / 11f
-            val len = 2.1f + Random.nextFloat() * 0.6f
+            val len = 1.6f + Random.nextFloat() * 0.3f
             val d = norm(floatArrayOf(cos(angle), sin(angle), (Random.nextFloat() - 0.5f) * 0.5f))
             val bp = listOf(
                 floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f),
@@ -544,7 +542,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         for (i in 0 until COUNT) {
             pTheta[i] = Random.nextFloat() * PI.toFloat() * 2f
             pPhi[i] = kotlin.math.acos(2f * Random.nextFloat() - 1f)
-            pRadius[i] = 1.0f + Random.nextFloat() * 1.25f
+            pRadius[i] = 1.0f + Random.nextFloat() * 0.9f
             pSpeed[i] = 0.12f + Random.nextFloat() * 0.65f
             pPhase[i] = Random.nextFloat() * PI.toFloat() * 2f
             pDrift[i] = (Random.nextFloat() - 0.5f) * 0.16f
@@ -632,8 +630,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     /** A soft halo: the same lines drawn again, slightly offset and dimmer, so they look thicker. */
     private fun halo(g: Geo, mv: FloatArray, c: FloatArray, alpha: Float, mode: Int) {
         drawMesh(g, mv, c, alpha, mode, 0f, false)
-        drawMesh(g, M.mul(M.trans(0.0013f, 0.0013f, 0f), mv), c, alpha * 0.2f, mode, 0f, false)
-        drawMesh(g, M.mul(M.trans(-0.0013f, -0.0013f, 0f), mv), c, alpha * 0.2f, mode, 0f, false)
+        drawMesh(g, M.mul(M.trans(0.0013f, 0.0013f, 0f), mv), c, alpha * 0.1f, mode, 0f, false)
+        drawMesh(g, M.mul(M.trans(-0.0013f, -0.0013f, 0f), mv), c, alpha * 0.1f, mode, 0f, false)
     }
 
     private fun drawSprite(size: Float, opacity: Float) {
@@ -642,7 +640,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val aCorner = spriteP.a("aCorner")
         GL.glEnableVertexAttribArray(aCorner)
         GL.glVertexAttribPointer(aCorner, 2, GL.GL_FLOAT, false, 0, 0)
-        GL.glUniform3f(spriteP.u("uCenter"), 0f, 0f, -6.3f)
+        GL.glUniform3f(spriteP.u("uCenter"), 0f, 0f, -8.5f)
         GL.glUniform1f(spriteP.u("uSize"), size * 0.5f)
         GL.glUniformMatrix4fv(spriteP.u("uProj"), 1, false, proj, 0)
         GL.glUniform1f(spriteP.u("uOpacity"), opacity)
@@ -666,8 +664,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val s = state
         val lvl = level.coerceIn(0f, 1f)
         targetScale = when (s) {
-            JarvisState.SPEAKING -> 1.35f
-            JarvisState.LISTENING -> 0.9f + lvl * 0.25f
+            JarvisState.SPEAKING -> 1.2f
+            JarvisState.LISTENING -> 0.8f + lvl * 0.2f
             else -> 1f
         }
         val speakPulse = if (s == JarvisState.SPEAKING) sin(t * 9f) * 0.04f else 0f
@@ -681,7 +679,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val dy = dragY
         val orbE = M.euler(sin(t * 0.22f) * 0.12f + dx, t * 0.13f + dy, sin(t * 0.15f) * 0.08f)
         val morb = M.mul(orbE, M.scl(curScale))
-        val view = M.trans(0f, 0f, -6.3f)
+        val view = M.trans(0f, 0f, -8.5f)
         val base = M.mul(view, morb)
 
         updateParticles(t)
@@ -696,7 +694,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         // Core: solid, drawn first.
         GL.glDisable(GL.GL_BLEND)
         GL.glDepthMask(true)
-        drawMesh(coreG, M.mul(base, M.scl(pulse)), C_CORE, 1f, GL.GL_TRIANGLES, 0f, false)
+        drawMesh(coreG, M.mul(base, M.scl(pulse)), C_CORE_HOT, 1f, GL.GL_TRIANGLES, 0f, false)
 
         // Everything else glows: additive blending, no depth writes.
         GL.glEnable(GL.GL_BLEND)
@@ -707,6 +705,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         drawSprite(glowInner * curScale, 0.48f)
         drawSprite(glowCore * curScale * 1.6f, 0.3f)
         drawSprite(glowCore * curScale * 2.4f, 0.55f)
+        drawSprite(glowCore * curScale * 0.7f, 1f)
 
         for (r in rings) {
             val ringE = M.euler(r.base[0], r.base[1], r.base[2] + r.speed * t * 0.06f)
