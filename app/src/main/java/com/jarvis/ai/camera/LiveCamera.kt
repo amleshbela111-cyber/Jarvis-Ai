@@ -12,7 +12,6 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
-import androidx.camera.core.toBitmap
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -111,7 +110,12 @@ private fun keepFrame(image: ImageProxy) {
         val now = System.currentTimeMillis()
         if (!LiveCamera.active || now - lastFrameMs < 500L) return
         lastFrameMs = now
-        val bmp = image.toBitmap()
+        // Read the RGBA frame directly, so no extra CameraX helper is needed.
+        val plane = image.planes[0]
+        val paddedW = plane.rowStride / plane.pixelStride
+        val raw = Bitmap.createBitmap(paddedW, image.height, Bitmap.Config.ARGB_8888)
+        raw.copyPixelsFromBuffer(plane.buffer)
+        val bmp = Bitmap.createBitmap(raw, 0, 0, image.width, image.height)
         val m = Matrix()
         val scale = minOf(1f, 640f / maxOf(bmp.width, bmp.height))
         m.postScale(scale, scale)
