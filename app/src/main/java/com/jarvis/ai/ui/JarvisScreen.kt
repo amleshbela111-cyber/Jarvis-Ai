@@ -174,139 +174,14 @@ private fun JarvisHome(
     onMicClick: () -> Unit,
     onStop: () -> Unit
 ) {
-    val listState = rememberLazyListState()
-    var menuOpen by rememberSaveable { mutableStateOf(false) }
-    val showUpdate by UpdateFlow.panelVisible.collectAsState()
-    val neuralAnswer by NeuralView.answer.collectAsState()
-    LaunchedEffect(ui.messages.size) {
-        if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.lastIndex)
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-    if (neuralAnswer == null) {
+    // The screen shows only the orb. Tapping it turns the mic on or off.
+    Box(modifier = Modifier.fillMaxSize().background(JarvisBackground)) {
         JarvisOrbGl(
             state = ui.state,
             soundLevel = ui.soundLevel,
             modifier = Modifier.fillMaxSize(),
             onTap = onMicClick
         )
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = "JARVIS",
-                color = JarvisCyan,
-                fontWeight = FontWeight.Bold,
-                fontSize = 22.sp
-            )
-            // Three lines at the top right. Tapping them opens the menu with Settings and Setup.
-            Box {
-                Column(
-                    modifier = Modifier
-                        .clickable { menuOpen = true }
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    repeat(3) {
-                        Box(
-                            modifier = Modifier
-                                .width(22.dp)
-                                .height(2.dp)
-                                .background(JarvisCyan)
-                        )
-                    }
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Settings") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenSettings()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Setup") },
-                        onClick = {
-                            menuOpen = false
-                            onOpenSetup()
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        StatusRow(ui)
-        Spacer(Modifier.height(12.dp))
-
-        // The orb and its status sit in the middle of the free space.
-        Column(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-        if (neuralAnswer != null) {
-            NeuralGraph(state = ui.state, soundLevel = ui.soundLevel)
-            Text(
-                text = neuralAnswer.orEmpty(),
-                color = JarvisText,
-                textAlign = TextAlign.Center,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 140.dp)
-                    .verticalScroll(rememberScrollState())
-                    .padding(top = 4.dp)
-            )
-            TextButton(onClick = { NeuralView.answer.value = null }) {
-                Text("ORB PAR LAUT CHALO", color = JarvisMuted)
-            }
-        } else {
-            Spacer(Modifier.height(300.dp))
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = ui.statusMessage,
-            color = JarvisText,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (ui.partialTranscript.isNotBlank()) {
-            Text(
-                text = ui.partialTranscript,
-                color = JarvisMuted,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-            )
-        }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.heightIn(max = 220.dp).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(ui.messages, key = { it.id }) { message ->
-                MessageBubble(message)
-            }
-        }
-
-        if (showUpdate) UpdatePanel()
-
-        Spacer(Modifier.height(12.dp))
-    }
     }
 }
 
