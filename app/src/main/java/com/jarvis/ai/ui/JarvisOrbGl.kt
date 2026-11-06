@@ -132,10 +132,10 @@ private fun hex(h: Int): FloatArray = floatArrayOf(((h shr 16) and 255) / 255f, 
 
 private val C_ORANGE = hex(0xC8500F)
 private val C_ORANGE_DARK = hex(0x7A2A08)
-private val C_ORANGE_GLOW = hex(0xD65E1C)
-private val C_GOLD = hex(0x9C6420)
+private val C_ORANGE_GLOW = hex(0xFF8A2A)
+private val C_GOLD = hex(0xE8A03A)
 private val C_CORE = hex(0xB8501A)
-private val C_PARTICLE = hex(0xB85A1E)
+private val C_PARTICLE = hex(0xFF9A3A)
 private val C_BODY = hex(0x140701)
 private val C_CORE_HOT = hex(0xFFF0C0)
 
@@ -215,6 +215,7 @@ void main(){
 private const val FS_SPRITE = """
 precision mediump float;
 uniform float uOpacity;
+uniform float uHot;
 varying vec2 vC;
 void main(){
   float d = length(vC);
@@ -229,6 +230,9 @@ void main(){
   else if (d < 0.28) c = mix(s1, s2, (d - 0.12) / 0.16);
   else if (d < 0.52) c = mix(s2, s3, (d - 0.28) / 0.24);
   else c = mix(s3, s4, (d - 0.52) / 0.48);
+  float hot = uHot * (1.0 - smoothstep(0.0, 0.4, d));
+  c.rgb = mix(c.rgb, vec3(1.0, 0.93, 0.75), hot);
+  c.a = max(c.a, hot);
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)), c.a * uOpacity);
 }
 """
@@ -485,7 +489,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     private lateinit var quarterB: Target
 
     // Sparks: each one lights up slowly on a ring, lifts off, scatters, then fades out.
-    private val EN = 420
+    private val EN = 3000
     private val eBuf = FloatArray(EN * 4)     // x, y, z, alpha (interleaved)
     private val eBase = FloatArray(EN * 3)
     private val eTan = FloatArray(EN * 3)
@@ -546,14 +550,14 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         quadG = makeGeo(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f), null, 4)
 
         rings = listOf(
-            Ring(torusGeo(1.22f, 0.018f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
-            Ring(torusGeo(1.48f, 0.024f, 16, 300, (PI * 1.5).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, -0.09f)
+            Ring(torusGeo(1.22f, 0.012f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
+            Ring(torusGeo(1.48f, 0.05f, 16, 300, (PI * 1.2).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, -0.09f)
         )
 
         // Inner wireframe: slightly wobbly latitude/longitude lines, plus loose great circles at random tilts.
         val sr = 0.76f
         val list = ArrayList<Strand>()
-        val parallels = 21
+        val parallels = 57
         for (k in 1..parallels) {
             val lat = k.toFloat() / (parallels + 1) * PI.toFloat() + (Random.nextFloat() - 0.5f) * 0.09f
             val r = sr * sin(lat)
@@ -567,8 +571,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
                 ptsY.add(floatArrayOf(rr * cos(ang), h, rr * sin(ang)))
                 ptsX.add(floatArrayOf(h, rr * cos(ang), rr * sin(ang)))
             }
-            list.add(Strand(tubeGeo(ptsY, true, 0.0042f), C_GOLD, 0.45f + Random.nextFloat() * 0.35f))
-            list.add(Strand(tubeGeo(ptsX, true, 0.0042f), C_ORANGE_GLOW, 0.45f + Random.nextFloat() * 0.35f))
+            list.add(Strand(tubeGeo(ptsY, true, 0.0065f), C_GOLD, 0.9f + Random.nextFloat() * 0.1f))
+            list.add(Strand(tubeGeo(ptsX, true, 0.0065f), C_ORANGE_GLOW, 0.9f + Random.nextFloat() * 0.1f))
         }
         for (k in 0 until 14) {
             val n = norm(floatArrayOf(Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f))
@@ -588,13 +592,13 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
                 ))
             }
             val col = listOf(C_ORANGE, C_ORANGE_GLOW, C_GOLD)[k % 3]
-            list.add(Strand(tubeGeo(pts, closed, 0.0032f), col, 0.35f + Random.nextFloat() * 0.35f))
+            list.add(Strand(tubeGeo(pts, closed, 0.0042f), col, 0.6f + Random.nextFloat() * 0.4f))
         }
         strands = list
 
         // Beams spread evenly over the whole sphere (golden-angle spiral), not bunched in one place.
         val bl = ArrayList<Beam>()
-        val nB = 26
+        val nB = 44
         val golden = PI.toFloat() * (3f - sqrt(5f))
         for (i in 0 until nB) {
             val y = 1f - 2f * (i + 0.5f) / nB
@@ -606,7 +610,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
                 floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f),
                 floatArrayOf(d[0] * len, d[1] * len, d[2] * len)
             )
-            bl.add(Beam(tubeGeo(bp, false, if (i % 3 == 0) 0.011f else 0.007f), if (i % 2 == 1) C_ORANGE else C_GOLD))
+            bl.add(Beam(tubeGeo(bp, false, if (i % 3 == 0) 0.014f else 0.009f), if (i % 2 == 1) C_ORANGE_GLOW else C_GOLD))
         }
         beams = bl
         beams = bl
@@ -662,11 +666,12 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     }
 
     private fun spawnEmber(i: Int) {
-        val ring = Random.nextInt(2)
-        val a = Random.nextFloat() * emberArc[ring]
-        val rad = emberRing[ring]
-        val b = xf(emberTilt[ring], floatArrayOf(rad * cos(a), 0f, rad * sin(a)))
-        val tg = xf(emberTilt[ring], floatArrayOf(-sin(a), 0f, cos(a)))
+        val ring = Random.nextInt(3)   // 0 and 1: the two rings, 2: the sphere's outer shell
+        val a = Random.nextFloat() * (if (ring == 2) PI.toFloat() * 2f else emberArc[ring])
+        val rad = if (ring == 2) 0.8f + Random.nextFloat() * 0.35f else emberRing[ring]
+        val tiltM = if (ring == 2) M.ident() else emberTilt[ring]
+        val b = xf(tiltM, floatArrayOf(rad * cos(a), (if (ring == 2) (Random.nextFloat() - 0.5f) * 0.9f else 0f), rad * sin(a)))
+        val tg = xf(tiltM, floatArrayOf(-sin(a), 0f, cos(a)))
         val sign = if (Random.nextBoolean()) 1f else -1f
         val out = norm(b)
         val rnd = norm(floatArrayOf(Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f))
@@ -678,7 +683,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         }
         eLife[i] = 6f + Random.nextFloat() * 4f
         eAge[i] = 0f
-        eDelay[i] = Random.nextFloat() * 4f
+        eDelay[i] = Random.nextFloat() * 2f
     }
 
     private fun updateEmbers(t: Float) {
@@ -697,7 +702,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
             }
             val u = eAge[i] / eLife[i]
             // Slow light-up on the ring, then lift off and scatter, then a slow fade.
-            val fade = ss(0f, 0.22f, u) * (1f - ss(0.6f, 1f, u))
+            val fade = ss(0f, 0.15f, u) * (1f - ss(0.75f, 1f, u))
             val twinkle = 0.85f + 0.15f * sin(t * 3f + ePhase[i])
             val sc = maxOf(u - 0.3f, 0f)
             val scatter = sc * sc * 1.8f
@@ -724,9 +729,9 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1f(emberP.u("uPxScale"), pxScale)
         val c = lin(C_PARTICLE)
         GL.glUniform4f(emberP.u("uColor"), c[0], c[1], c[2], 1f)
-        GL.glUniform1f(emberP.u("uPointSize"), 0.03f)
+        GL.glUniform1f(emberP.u("uPointSize"), 0.05f)
         GL.glDrawArrays(GL.GL_POINTS, 0, EN)
-        GL.glUniform1f(emberP.u("uPointSize"), 0.014f)
+        GL.glUniform1f(emberP.u("uPointSize"), 0.018f)
         GL.glDrawArrays(GL.GL_POINTS, 0, EN)
     }
 
@@ -758,7 +763,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         drawMesh(g, M.mul(M.trans(-0.0013f, -0.0013f, 0f), mv), c, alpha * 0.1f, mode, 0f, false)
     }
 
-    private fun drawSprite(size: Float, opacity: Float) {
+    private fun drawSprite(size: Float, opacity: Float, hot: Float = 0f) {
         GL.glUseProgram(spriteP.id)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, quadG.vbo)
         val aCorner = spriteP.a("aCorner")
@@ -768,6 +773,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1f(spriteP.u("uSize"), size * 0.5f)
         GL.glUniformMatrix4fv(spriteP.u("uProj"), 1, false, proj, 0)
         GL.glUniform1f(spriteP.u("uOpacity"), opacity)
+        GL.glUniform1f(spriteP.u("uHot"), hot)
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
     }
 
@@ -827,10 +833,12 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
 
         // Centre glow, breathing and fading out at the edges. No depth test, so it shows over the body.
         GL.glDisable(GL.GL_DEPTH_TEST)
-        drawSprite(glowCore * curScale * 2.4f, 0.22f)
-        drawSprite(glowCore * curScale * 1.5f, 0.32f)
-        drawSprite(glowInner * curScale * 0.7f, 0.5f)
-        drawSprite(glowCore * curScale * 0.45f, 0.4f)
+        drawSprite(glowCore * curScale * 2.6f, 0.35f)
+        drawSprite(glowCore * curScale * 1.6f, 0.55f)
+        drawSprite(glowInner * curScale * 0.8f, 0.8f)
+        drawSprite(glowCore * curScale * 0.4f, 1f)
+        drawSprite(glowCore * curScale * 0.9f, 1f, 1f)
+        drawSprite(glowCore * curScale * 0.35f, 1f, 1f)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
         for (r in rings) {
@@ -842,7 +850,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         for (st in strands) halo(st.g, strandMv, st.color, st.alpha, GL.GL_TRIANGLES)
 
         val beamMv = M.mul(base, M.euler(0f, t * 0.07f, 0f))
-        for (b in beams) halo(b.g, beamMv, b.color, 0.75f, GL.GL_TRIANGLES)
+        for (b in beams) halo(b.g, beamMv, b.color, 1f, GL.GL_TRIANGLES)
 
         val partMv = M.mul(base, M.euler(0f, -t * 0.06f, 0f))
         drawEmbers(partMv)
@@ -886,8 +894,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1i(compP.u("uScene"), 0)
         GL.glUniform1i(compP.u("uBloom"), 1)
         GL.glUniform1i(compP.u("uWide"), 2)
-        GL.glUniform1f(compP.u("uStrength"), 0.6f)
-        GL.glUniform1f(compP.u("uWideStrength"), 0.35f)
+        GL.glUniform1f(compP.u("uStrength"), 1.4f)
+        GL.glUniform1f(compP.u("uWideStrength"), 0.9f)
         GL.glActiveTexture(GL.GL_TEXTURE1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, blurB.tex)
         GL.glActiveTexture(GL.GL_TEXTURE2)
