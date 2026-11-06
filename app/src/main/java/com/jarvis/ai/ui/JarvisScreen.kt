@@ -262,7 +262,7 @@ private fun JarvisHome(
                 Text("ORB PAR LAUT CHALO", color = JarvisMuted)
             }
         } else {
-            JarvisOrbWebView(
+            JarvisOrbGl(
                 state = ui.state,
                 soundLevel = ui.soundLevel,
                 onTap = onMicClick
