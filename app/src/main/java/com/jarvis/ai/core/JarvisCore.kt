@@ -304,6 +304,19 @@ object JarvisCore {
             com.jarvis.ai.update.UpdateFlow.draft.value = command
             return "Prompt taiyar hai. Screen par CLAUDE button dabaiye."
         }
+        // "Live mode on/off": switches between the normal mic and Gemini Live.
+        if (Regex("(live mode|लाइव मोड)", RegexOption.IGNORE_CASE).containsMatchIn(command)) {
+            val off = Regex("(off|band|बंद|बन्द|stop)", RegexOption.IGNORE_CASE).containsMatchIn(command)
+            val on = Regex("(on|chalu|चालू|shuru|शुरू|start)", RegexOption.IGNORE_CASE).containsMatchIn(command)
+            if (on || off) {
+                d.settings.liveMode = on && !off
+                return if (d.settings.liveMode) {
+                    "Live mode chalu. Mic ek baar band karke phir chalu karein."
+                } else {
+                    "Live mode band. Normal mode chalu hai."
+                }
+            }
+        }
         screenNavFor(command)?.let { target ->
             com.jarvis.ai.ui.ScreenNav.request.value = target
             return when (target) {

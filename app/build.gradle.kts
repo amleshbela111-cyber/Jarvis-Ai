@@ -16,8 +16,8 @@ android {
             // Modern phones are 64-bit ARM. One ABI keeps the APK small.
             abiFilters += listOf("arm64-v8a")
         }
-        versionCode = 64
-        versionName = "2.13.5"
+        versionCode = 65
+        versionName = "2.14.0"
     }
 
     buildTypes {
@@ -53,6 +53,7 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.camera:camera-core:1.3.4")
     implementation("androidx.camera:camera-camera2:1.3.4")
     implementation("androidx.camera:camera-lifecycle:1.3.4")

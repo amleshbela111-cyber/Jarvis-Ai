@@ -29,6 +29,13 @@ class JarvisSettings(context: Context) {
         }
 
     /** The phone voice picked for one language (its name as Android lists it), or null for the automatic choice. */
+    /** Live mode: the mic streams to Gemini Live and replies are spoken as they come. */
+    var liveMode: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_MODE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_LIVE_MODE, value).apply()
+        }
+
     fun voiceName(language: SpeechLanguage): String? = prefs.getString(KEY_VOICE_PREFIX + language.tag, null)
 
     fun setVoiceName(language: SpeechLanguage, name: String) {
@@ -79,6 +86,7 @@ class JarvisSettings(context: Context) {
         private const val PREFS_NAME = "jarvis_settings"
         private const val KEY_LANGUAGE = "speech_language"
         private const val KEY_SPEAK_RESPONSES = "speak_responses"
+        private const val KEY_LIVE_MODE = "live_mode"
         private const val KEY_GEMINI_MODEL = "gemini_model"
         private const val KEY_REPLY_STYLE = "reply_style"
         private const val KEY_VOICE_SPEED = "voice_speed"
