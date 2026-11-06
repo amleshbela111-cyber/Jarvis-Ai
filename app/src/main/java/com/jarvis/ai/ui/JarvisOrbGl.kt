@@ -193,7 +193,7 @@ void main(){
   else if (d < 0.28) c = mix(s1, s2, (d - 0.12) / 0.16);
   else if (d < 0.52) c = mix(s2, s3, (d - 0.28) / 0.24);
   else c = mix(s3, s4, (d - 0.52) / 0.48);
-  gl_FragColor = vec4(c.rgb, c.a * uOpacity);
+  gl_FragColor = vec4(pow(c.rgb, vec3(2.2)), c.a * uOpacity);
 }
 """
 
@@ -238,7 +238,7 @@ uniform float uWideStrength;
 varying vec2 vUv;
 void main(){
   vec3 c = texture2D(uScene, vUv).rgb + texture2D(uBloom, vUv).rgb * uStrength + texture2D(uWide, vUv).rgb * uWideStrength;
-  gl_FragColor = vec4(min(c, 1.0), 1.0);
+  gl_FragColor = vec4(pow(min(c, 1.0), vec3(0.4545)), 1.0);
 }
 """
 
@@ -351,6 +351,50 @@ private fun norm(a: FloatArray): FloatArray {
     val l = sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).let { if (it == 0f) 1f else it }
     return floatArrayOf(a[0] / l, a[1] / l, a[2] / l)
 }
+
+/** A thick tube along a list of points, like three.js TubeGeometry (closed or open). */
+private fun tubeGeo(points: List<FloatArray>, closed: Boolean, radius: Float, radial: Int = 6): Geo {
+    val n = points.size
+    val verts = FloatArray(n * (radial + 1) * 3)
+    var k = 0
+    for (i in 0 until n) {
+        val prev = points[if (i == 0) (if (closed) n - 1 else 0) else i - 1]
+        val next = points[if (i == n - 1) (if (closed) 0 else n - 1) else i + 1]
+        val t = norm(floatArrayOf(next[0] - prev[0], next[1] - prev[1], next[2] - prev[2]))
+        val ref = if (abs(t[1]) > 0.9f) floatArrayOf(1f, 0f, 0f) else floatArrayOf(0f, 1f, 0f)
+        val nn = norm(cross(t, ref))
+        val bb = cross(t, nn)
+        val p = points[i]
+        for (j in 0..radial) {
+            val a = j.toFloat() / radial * 2f * PI.toFloat()
+            val ca = cos(a) * radius
+            val sa = sin(a) * radius
+            verts[k++] = p[0] + ca * nn[0] + sa * bb[0]
+            verts[k++] = p[1] + ca * nn[1] + sa * bb[1]
+            verts[k++] = p[2] + ca * nn[2] + sa * bb[2]
+        }
+    }
+    val segs = if (closed) n else n - 1
+    val idx = IntArray(segs * radial * 6)
+    var q = 0
+    for (i in 0 until segs) {
+        val i2 = (i + 1) % n
+        for (j in 0 until radial) {
+            val a = i * (radial + 1) + j
+            val b = i2 * (radial + 1) + j
+            idx[q++] = a; idx[q++] = b; idx[q++] = a + 1
+            idx[q++] = b; idx[q++] = b + 1; idx[q++] = a + 1
+        }
+    }
+    return makeGeo(verts, idx, verts.size / 3)
+}
+
+/** Colours are blended in linear light, like three.js does. */
+private fun lin(c: FloatArray): FloatArray = floatArrayOf(
+    Math.pow(c[0].toDouble(), 2.2).toFloat(),
+    Math.pow(c[1].toDouble(), 2.2).toFloat(),
+    Math.pow(c[2].toDouble(), 2.2).toFloat()
+)
 
 /** A closed loop of points (LINE_LOOP). */
 private fun loopGeo(points: List<FloatArray>): Geo {
@@ -470,7 +514,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
                     sr * (cos(a) * u[2] + sin(a) * v[2])
                 ))
             }
-            list.add(Strand(loopGeo(pts), if (i % 4 == 0) C_ORANGE_GLOW else C_GOLD, 0.85f))
+            list.add(Strand(tubeGeo(pts, true, 0.006f), if (i % 4 == 0) C_ORANGE_GLOW else C_GOLD, 0.85f))
         }
         for (i in 1..7) {
             val lat = i.toFloat() / 8f * PI.toFloat()
@@ -481,7 +525,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
                 val aa = j.toFloat() / 240f * PI.toFloat() * 2f
                 pts.add(floatArrayOf(r * cos(aa), yy, r * sin(aa)))
             }
-            list.add(Strand(loopGeo(pts), C_ORANGE_GLOW, 0.72f))
+            list.add(Strand(tubeGeo(pts, true, 0.005f), C_ORANGE_GLOW, 0.72f))
         }
         strands = list
 
@@ -491,8 +535,11 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
             val angle = i * PI.toFloat() * 2f / 11f
             val len = 1.5f + Random.nextFloat() * 0.35f
             val d = norm(floatArrayOf(cos(angle), sin(angle), (Random.nextFloat() - 0.5f) * 0.5f))
-            val verts = floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f, d[0] * len, d[1] * len, d[2] * len)
-            bl.add(Beam(makeGeo(verts, null, 2), if (i % 2 == 1) C_ORANGE else C_GOLD))
+            val bp = listOf(
+                floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f),
+                floatArrayOf(d[0] * len, d[1] * len, d[2] * len)
+            )
+            bl.add(Beam(tubeGeo(bp, false, 0.008f), if (i % 2 == 1) C_ORANGE else C_GOLD))
         }
         beams = bl
 
@@ -572,7 +619,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glVertexAttribPointer(aPos, 3, GL.GL_FLOAT, false, 0, 0)
         GL.glUniformMatrix4fv(meshP.u("uMV"), 1, false, mv, 0)
         GL.glUniformMatrix4fv(meshP.u("uProj"), 1, false, proj, 0)
-        GL.glUniform4f(meshP.u("uColor"), c[0], c[1], c[2], alpha)
+        val lc = lin(c)
+        GL.glUniform4f(meshP.u("uColor"), lc[0], lc[1], lc[2], alpha)
         GL.glUniform1f(meshP.u("uPointSize"), psize)
         GL.glUniform1f(meshP.u("uPxScale"), pxScale)
         GL.glUniform1f(meshP.u("uRound"), if (round) 1f else 0f)
@@ -668,14 +716,13 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         }
 
         val strandMv = M.mul(base, M.euler(t * 0.08f, -t * 0.12f, t * 0.035f))
-        for (st in strands) halo(st.g, strandMv, st.color, st.alpha, GL.GL_LINE_LOOP)
+        for (st in strands) halo(st.g, strandMv, st.color, st.alpha, GL.GL_TRIANGLES)
 
         val beamMv = M.mul(base, M.euler(0f, t * 0.07f, 0f))
-        for (b in beams) halo(b.g, beamMv, b.color, 0.9f, GL.GL_LINE_STRIP)
+        for (b in beams) halo(b.g, beamMv, b.color, 0.9f, GL.GL_TRIANGLES)
 
         val partMv = M.mul(base, M.euler(0f, -t * 0.06f, 0f))
-        drawMesh(particleBuf, partMv, C_PARTICLE, 0.1f, GL.GL_POINTS, 0.036f, true)
-        drawMesh(particleBuf, partMv, C_PARTICLE, 0.88f, GL.GL_POINTS, 0.014f, true)
+        drawMesh(particleBuf, partMv, C_PARTICLE, 0.88f, GL.GL_POINTS, 0.014f, false)
 
         // Bloom: bright parts blurred at half size, then a wide halo at quarter size.
         GL.glDisable(GL.GL_BLEND)
@@ -716,8 +763,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1i(compP.u("uScene"), 0)
         GL.glUniform1i(compP.u("uBloom"), 1)
         GL.glUniform1i(compP.u("uWide"), 2)
-        GL.glUniform1f(compP.u("uStrength"), 0.55f)
-        GL.glUniform1f(compP.u("uWideStrength"), 0.35f)
+        GL.glUniform1f(compP.u("uStrength"), 0.9f)
+        GL.glUniform1f(compP.u("uWideStrength"), 0.6f)
         GL.glActiveTexture(GL.GL_TEXTURE1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, blurB.tex)
         GL.glActiveTexture(GL.GL_TEXTURE2)
