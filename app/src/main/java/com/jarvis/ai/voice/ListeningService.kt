@@ -113,6 +113,8 @@ class ListeningService : Service(), VoiceController.Listener {
 
     private fun beginListening() {
         if (busy || sessionActive || wakeListening || !JarvisCore.snapshot.value.listening) return
+        handler.removeCallbacks(sessionWatchdog)
+        handler.postDelayed(sessionWatchdog, SESSION_WATCHDOG_MS)
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         if (!granted) {
@@ -167,7 +169,7 @@ class ListeningService : Service(), VoiceController.Listener {
                 }
             }.onFailure { error ->
                 sessionActive = false
-                JarvisCore.setVoiceState(JarvisState.IDLE, "Groq awaaz nahi samajh paya (${error.message?.take(60)}). Phone ka recognizer use kiya.")
+                if (!continuous) JarvisCore.setVoiceState(JarvisState.IDLE, "Groq awaaz nahi samajh paya (${error.message?.take(60)}). Phone ka recognizer use kiya.")
                 startPhoneRecognizer()
             }
         }
@@ -187,6 +189,24 @@ class ListeningService : Service(), VoiceController.Listener {
         wake?.stop()
     }
 
+    /** If a recognition session never reports back, end it and restart the mic. */
+    private val sessionWatchdog = Runnable {
+        if (sessionActive && !busy && continuous) {
+            sessionActive = false
+            runCatching { voice.stopListening() }
+            scheduleRestart(RESTART_DELAY_MS)
+        }
+    }
+
+    /** If speaking never reports that it finished, clear the busy flag so the mic comes back. */
+    private val speakWatchdog = Runnable {
+        if (busy) {
+            busy = false
+            JarvisCore.setVoiceState(JarvisState.IDLE, "Sun raha hoon...")
+            scheduleRestart(RESTART_DELAY_MS)
+        }
+    }
+
     private fun scheduleRestart(delayMs: Long) {
         handler.removeCallbacks(restartRunnable)
         handler.postDelayed(restartRunnable, delayMs)
@@ -198,6 +218,8 @@ class ListeningService : Service(), VoiceController.Listener {
         val speakOn = JarvisCore.settings().speakResponses
         if (speak && speakOn && voice.speak(reply)) {
             // onSpeechStarted and onSpeechFinished continue the loop from here.
+            handler.removeCallbacks(speakWatchdog)
+            handler.postDelayed(speakWatchdog, SPEAK_WATCHDOG_MS)
             return
         }
         busy = false
@@ -299,11 +321,22 @@ class ListeningService : Service(), VoiceController.Listener {
         if (!busy) scheduleRestart(RESTART_DELAY_MS)
     }
 
+    /** While the mic is meant to be on, show "listening" even between sessions, so it never looks switched off. */
+    private fun keepListeningLook() {
+        if (continuous && !busy) JarvisCore.setVoiceState(JarvisState.LISTENING, "Sun raha hoon...")
+    }
+
     override fun onVoiceError(message: String) {
         sessionActive = false
         JarvisCore.setPartial("")
-        JarvisCore.setVoiceState(JarvisState.IDLE, message)
-        if (!busy) scheduleRestart(RESTART_DELAY_MS * 3)
+        if (continuous) {
+            // Silence, a busy recognizer or a dropped network: keep the mic on and try again at once.
+            keepListeningLook()
+            if (!busy) scheduleRestart(RESTART_DELAY_MS)
+        } else {
+            JarvisCore.setVoiceState(JarvisState.IDLE, message)
+            if (!busy) scheduleRestart(RESTART_DELAY_MS * 3)
+        }
     }
 
     override fun onSpeechStarted() {
@@ -312,6 +345,7 @@ class ListeningService : Service(), VoiceController.Listener {
     }
 
     override fun onSpeechFinished() {
+        handler.removeCallbacks(speakWatchdog)
         busy = false
         awakeUntil = System.currentTimeMillis() + AWAKE_MS
         JarvisCore.setVoiceState(JarvisState.IDLE, "Sun raha hoon...")
@@ -366,7 +400,9 @@ class ListeningService : Service(), VoiceController.Listener {
 
         private const val CHANNEL_ID = "jarvis_listening"
         private const val NOTIFICATION_ID = 42
-        private const val RESTART_DELAY_MS = 500L
+        private const val RESTART_DELAY_MS = 150L
+        private const val SESSION_WATCHDOG_MS = 30_000L
+        private const val SPEAK_WATCHDOG_MS = 30_000L
 
         /** How long Jarvis stays awake after a reply, so follow-up questions need no wake word. */
         private const val AWAKE_MS = 20_000L

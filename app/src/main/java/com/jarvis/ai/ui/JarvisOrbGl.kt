@@ -819,9 +819,10 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
         val t = (System.nanoTime() - startNs) / 1e9f
         val s = state
         val lvl = level.coerceIn(0f, 1f)
-        targetScale = when (s) {
-            JarvisState.SPEAKING -> 1.7f
-            JarvisState.LISTENING -> 1.0f + minOf(lvl * 2.5f, 1f) * 0.6f
+        // Grows with your voice whenever the mic reports a level, even if the state is not LISTENING.
+        targetScale = when {
+            s == JarvisState.SPEAKING -> 1.7f
+            lvl > 0.02f -> 1.0f + minOf(lvl * 2.5f, 1f) * 0.6f
             else -> 1f
         }
         val speakPulse = if (s == JarvisState.SPEAKING) sin(t * 9f) * 0.08f else 0f
