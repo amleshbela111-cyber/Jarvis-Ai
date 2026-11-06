@@ -117,9 +117,9 @@ var FS_BLUR=
 "  gl_FragColor=vec4(c,1.0);\n"+
 "}\n";
 var FS_COMP=
-"precision mediump float;\nuniform sampler2D uScene;\nuniform sampler2D uBloom;\nuniform float uStrength;\nvarying vec2 vUv;\n"+
+"precision mediump float;\nuniform sampler2D uScene;\nuniform sampler2D uBloom;\nuniform sampler2D uWide;\nuniform float uStrength;\nuniform float uWideStrength;\nvarying vec2 vUv;\n"+
 "void main(){\n"+
-"  vec3 c=texture2D(uScene,vUv).rgb+texture2D(uBloom,vUv).rgb*uStrength;\n"+
+"  vec3 c=texture2D(uScene,vUv).rgb+texture2D(uBloom,vUv).rgb*uStrength+texture2D(uWide,vUv).rgb*uWideStrength;\n"+
 "  gl_FragColor=vec4(min(c,1.0),1.0);\n"+
 "}\n";
 
@@ -328,7 +328,7 @@ function target(w,h,withDepth){
   return {tex:tex,fb:fb,w:w,h:h};
 }
 
-var proj=null,sceneT=null,blurA=null,blurB=null,pxScale=1;
+var proj=null,sceneT=null,blurA=null,blurB=null,quarterA=null,quarterB=null,pxScale=1;
 function resize(){
   var dpr=Math.min(window.devicePixelRatio||1,2);
   var w=Math.max(1,Math.floor(window.innerWidth*dpr));
@@ -339,6 +339,8 @@ function resize(){
   sceneT=target(w,h,true);
   blurA=target(Math.max(1,w>>1),Math.max(1,h>>1),false);
   blurB=target(Math.max(1,w>>1),Math.max(1,h>>1),false);
+  quarterA=target(Math.max(1,w>>2),Math.max(1,h>>2),false);
+  quarterB=target(Math.max(1,w>>2),Math.max(1,h>>2),false);
 }
 resize();
 window.addEventListener("resize",resize);
@@ -413,6 +415,13 @@ window.addEventListener("pointerup",function(e){
   dragging=false;
 });
 
+// Soft halo: the same lines drawn again, slightly offset and dimmer, so they look thicker and glow.
+function halo(g,mv,col,a,mode){
+  drawMesh(g,mv,col,a,mode,0,false);
+  drawMesh(g,mul(trans(0.0013,0.0013,0),mv),col,a*0.2,mode,0,false);
+  drawMesh(g,mul(trans(-0.0013,-0.0013,0),mv),col,a*0.2,mode,0,false);
+}
+
 // ---------- frame ----------
 var start=performance.now();
 function frame(){
@@ -453,12 +462,13 @@ function frame(){
   // Glow sprites (core halo and inner halo).
   drawSprite(glowCore*curScale,0.9);
   drawSprite(glowInner*curScale,0.48);
+  drawSprite(glowCore*curScale*1.6,0.3);
 
   // Outer orbit rings, each on its own axis and speed.
   for(var i=0;i<rings.length;i++){
     var R=rings[i];
     var ringE=euler(R.base[0],R.base[1],R.base[2]+R.speed*t*0.06);
-    drawMesh(R.g,mul(base,ringE),R.c,0.95,gl.TRIANGLES,0,false);
+    halo(R.g,mul(base,ringE),R.c,0.95,gl.TRIANGLES);
   }
 
   // Inner wireframe strands, turning together.
@@ -466,20 +476,21 @@ function frame(){
   var strandMv=mul(base,strandE);
   for(i=0;i<strandLoops.length;i++){
     var s=strandLoops[i];
-    drawMesh(s.g,strandMv,s.c,s.a,gl.LINE_LOOP,0,false);
+    halo(s.g,strandMv,s.c,s.a,gl.LINE_LOOP);
   }
 
   // Radial beams.
   var beamMv=mul(base,euler(0,t*0.07,0));
   for(i=0;i<beams.length;i++){
-    drawMesh(beams[i].g,beamMv,beams[i].c,0.9,gl.LINE_STRIP,0,false);
+    halo(beams[i].g,beamMv,beams[i].c,0.9,gl.LINE_STRIP);
   }
 
   // Particles.
   var partMv=mul(base,euler(0,-t*0.06,0));
+  drawMesh({buf:pBuf,count:COUNT},partMv,C.particle,0.1,gl.POINTS,0.036,true);
   drawMesh({buf:pBuf,count:COUNT},partMv,C.particle,0.88,gl.POINTS,0.014,true);
 
-  // Bloom: bright parts blurred at half size, then added back on the screen.
+  // Bloom: bright parts blurred at half size, then a wide halo at quarter size.
   gl.disable(gl.BLEND);
   gl.depthMask(true);
   gl.disable(gl.DEPTH_TEST);
@@ -488,7 +499,7 @@ function frame(){
   gl.viewport(0,0,blurA.w,blurA.h);
   gl.useProgram(PBlur.p);
   gl.uniform2f(PBlur.u.uStep,2/sceneT.w,0);
-  gl.uniform1f(PBlur.u.uThresh,0.18);
+  gl.uniform1f(PBlur.u.uThresh,0.12);
   gl.uniform1f(PBlur.u.uUseThresh,1);
   gl.uniform1i(PBlur.u.uTex,0);
   fullPass(PBlur,sceneT.tex);
@@ -499,15 +510,30 @@ function frame(){
   gl.uniform1f(PBlur.u.uUseThresh,0);
   fullPass(PBlur,blurA.tex);
 
+  gl.bindFramebuffer(gl.FRAMEBUFFER,quarterA.fb);
+  gl.viewport(0,0,quarterA.w,quarterA.h);
+  gl.uniform2f(PBlur.u.uStep,4/blurB.w,0);
+  fullPass(PBlur,blurB.tex);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER,quarterB.fb);
+  gl.viewport(0,0,quarterB.w,quarterB.h);
+  gl.uniform2f(PBlur.u.uStep,0,4/quarterA.h);
+  fullPass(PBlur,quarterA.tex);
+
+  // Composite: scene + bloom + wide halo.
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.useProgram(PComp.p);
   gl.uniform1i(PComp.u.uScene,0);
   gl.uniform1i(PComp.u.uBloom,1);
-  gl.uniform1f(PComp.u.uStrength,1.3);
+  gl.uniform1i(PComp.u.uWide,2);
+  gl.uniform1f(PComp.u.uStrength,0.55);
+  gl.uniform1f(PComp.u.uWideStrength,0.35);
   gl.activeTexture(gl.TEXTURE1);
   gl.bindTexture(gl.TEXTURE_2D,blurB.tex);
+  gl.activeTexture(gl.TEXTURE2);
+  gl.bindTexture(gl.TEXTURE_2D,quarterB.tex);
   gl.bindBuffer(gl.ARRAY_BUFFER,quadG.buf);
   gl.enableVertexAttribArray(PComp.aP);
   gl.vertexAttribPointer(PComp.aP,2,gl.FLOAT,false,0,0);
