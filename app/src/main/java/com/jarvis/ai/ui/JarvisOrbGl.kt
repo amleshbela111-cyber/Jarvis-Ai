@@ -69,6 +69,8 @@ class OrbGlView(context: Context) : GLSurfaceView(context) {
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
+        // Touches outside the orb go to the screen's buttons and text, not to the orb.
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && !renderer.isNearOrb(e.x, e.y)) return false
         renderer.onTouch(e.actionMasked, e.x, e.y)
         return true
     }
@@ -238,7 +240,9 @@ uniform float uWideStrength;
 varying vec2 vUv;
 void main(){
   vec3 c = texture2D(uScene, vUv).rgb + texture2D(uBloom, vUv).rgb * uStrength + texture2D(uWide, vUv).rgb * uWideStrength;
-  gl_FragColor = vec4(pow(min(c, 1.0), vec3(0.4545)), 1.0);
+  vec3 e = pow(min(c, 1.0), vec3(0.4545));
+  e = max(e - vec3(0.04), 0.0) / 0.96;
+  gl_FragColor = vec4(e, 1.0);
 }
 """
 
@@ -435,7 +439,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     private lateinit var quarterA: Target
     private lateinit var quarterB: Target
 
-    private val COUNT = 5200
+    private val COUNT = 9000
     private val pPos = FloatArray(COUNT * 3)
     private val pSpeed = FloatArray(COUNT)
     private val pPhase = FloatArray(COUNT)
@@ -454,6 +458,9 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     private var downY = 0f
     @Volatile private var dragX = 0f
     @Volatile private var dragY = 0f
+
+    fun isNearOrb(x: Float, y: Float): Boolean =
+        dist(x - viewW / 2f, y - viewH / 2f) < 0.4f * minOf(viewW, viewH)
 
     fun onTouch(action: Int, x: Float, y: Float) {
         when (action) {
@@ -496,25 +503,15 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         // Inner wireframe: 24 great circles spread evenly, plus 7 latitude rings.
         val sr = 0.76f
         val list = ArrayList<Strand>()
-        val circleCount = 24
-        for (i in 0 until circleCount) {
-            val y = 1f - (i.toFloat() / (circleCount - 1)) * 2f
-            val rad = sqrt(1f - y * y)
-            val th = i * PI.toFloat() * (3f - sqrt(5f))
-            val n = norm(floatArrayOf(cos(th) * rad, y, sin(th) * rad))
-            val ref = if (abs(n[1]) > 0.95f) floatArrayOf(1f, 0f, 0f) else floatArrayOf(0f, 1f, 0f)
-            val u = norm(cross(n, ref))
-            val v = norm(cross(n, u))
+        // Latitude and longitude lines: every meridian crosses every parallel at 90 degrees, as in the reference.
+        for (m in 0 until 12) {
+            val phi = m * PI.toFloat() / 12f
             val pts = ArrayList<FloatArray>()
             for (j in 0 until 240) {
                 val a = j.toFloat() / 240f * PI.toFloat() * 2f
-                pts.add(floatArrayOf(
-                    sr * (cos(a) * u[0] + sin(a) * v[0]),
-                    sr * (cos(a) * u[1] + sin(a) * v[1]),
-                    sr * (cos(a) * u[2] + sin(a) * v[2])
-                ))
+                pts.add(floatArrayOf(sr * sin(a) * cos(phi), sr * cos(a), sr * sin(a) * sin(phi)))
             }
-            list.add(Strand(tubeGeo(pts, true, 0.006f), if (i % 4 == 0) C_ORANGE_GLOW else C_GOLD, 0.85f))
+            list.add(Strand(tubeGeo(pts, true, 0.008f), if (m % 2 == 0) C_GOLD else C_ORANGE_GLOW, 0.85f))
         }
         for (i in 1..7) {
             val lat = i.toFloat() / 8f * PI.toFloat()
@@ -531,15 +528,15 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
 
         // Radial beams (random tilt, like the original).
         val bl = ArrayList<Beam>()
-        for (i in 0 until 11) {
+        for (i in 0 until 16) {
             val angle = i * PI.toFloat() * 2f / 11f
-            val len = 1.5f + Random.nextFloat() * 0.35f
+            val len = 2.1f + Random.nextFloat() * 0.6f
             val d = norm(floatArrayOf(cos(angle), sin(angle), (Random.nextFloat() - 0.5f) * 0.5f))
             val bp = listOf(
                 floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f),
                 floatArrayOf(d[0] * len, d[1] * len, d[2] * len)
             )
-            bl.add(Beam(tubeGeo(bp, false, 0.008f), if (i % 2 == 1) C_ORANGE else C_GOLD))
+            bl.add(Beam(tubeGeo(bp, false, 0.012f), if (i % 2 == 1) C_ORANGE else C_GOLD))
         }
         beams = bl
 
@@ -547,7 +544,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         for (i in 0 until COUNT) {
             pTheta[i] = Random.nextFloat() * PI.toFloat() * 2f
             pPhi[i] = kotlin.math.acos(2f * Random.nextFloat() - 1f)
-            pRadius[i] = 1.15f + Random.nextFloat() * 0.78f
+            pRadius[i] = 1.0f + Random.nextFloat() * 1.25f
             pSpeed[i] = 0.12f + Random.nextFloat() * 0.65f
             pPhase[i] = Random.nextFloat() * PI.toFloat() * 2f
             pDrift[i] = (Random.nextFloat() - 0.5f) * 0.16f
@@ -692,7 +689,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         // Scene pass into an offscreen target.
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, sceneT.fb)
         GL.glViewport(0, 0, sceneT.w, sceneT.h)
-        GL.glClearColor(3f / 255f, 1f / 255f, 0f, 1f)
+        GL.glClearColor(0f, 0f, 0f, 1f)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
@@ -709,6 +706,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         drawSprite(glowCore * curScale, 0.9f)
         drawSprite(glowInner * curScale, 0.48f)
         drawSprite(glowCore * curScale * 1.6f, 0.3f)
+        drawSprite(glowCore * curScale * 2.4f, 0.55f)
 
         for (r in rings) {
             val ringE = M.euler(r.base[0], r.base[1], r.base[2] + r.speed * t * 0.06f)
@@ -722,7 +720,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         for (b in beams) halo(b.g, beamMv, b.color, 0.9f, GL.GL_TRIANGLES)
 
         val partMv = M.mul(base, M.euler(0f, -t * 0.06f, 0f))
-        drawMesh(particleBuf, partMv, C_PARTICLE, 0.88f, GL.GL_POINTS, 0.014f, false)
+        drawMesh(particleBuf, partMv, C_PARTICLE, 0.35f, GL.GL_POINTS, 0.026f, false)
+        drawMesh(particleBuf, partMv, C_PARTICLE, 0.9f, GL.GL_POINTS, 0.014f, false)
 
         // Bloom: bright parts blurred at half size, then a wide halo at quarter size.
         GL.glDisable(GL.GL_BLEND)

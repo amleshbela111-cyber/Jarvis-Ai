@@ -182,6 +182,15 @@ private fun JarvisHome(
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.lastIndex)
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
+    if (neuralAnswer == null) {
+        JarvisOrbGl(
+            state = ui.state,
+            soundLevel = ui.soundLevel,
+            modifier = Modifier.fillMaxSize(),
+            onTap = onMicClick
+        )
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -262,11 +271,7 @@ private fun JarvisHome(
                 Text("ORB PAR LAUT CHALO", color = JarvisMuted)
             }
         } else {
-            JarvisOrbGl(
-                state = ui.state,
-                soundLevel = ui.soundLevel,
-                onTap = onMicClick
-            )
+            Spacer(Modifier.height(300.dp))
         }
 
         Spacer(Modifier.height(8.dp))
@@ -301,6 +306,7 @@ private fun JarvisHome(
         if (showUpdate) UpdatePanel()
 
         Spacer(Modifier.height(12.dp))
+    }
     }
 }
 
