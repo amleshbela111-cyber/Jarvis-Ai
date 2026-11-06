@@ -150,7 +150,7 @@ varying float vFade;
 void main(){
   vec4 p = uMV * vec4(aPos, 1.0);
   gl_Position = uProj * p;
-  vFade = clamp(1.0 - (-p.z - 17f) * 0.3, 0.3, 1.0);
+  vFade = clamp(1.0 - (-p.z - 17.0) * 0.3, 0.3, 1.0);
   gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
 }
 """
@@ -182,7 +182,7 @@ varying float vA;
 void main(){
   vec4 p = uMV * vec4(aPos, 1.0);
   gl_Position = uProj * p;
-  vA = aA * clamp(1.0 - (-p.z - 17f) * 0.3, 0.3, 1.0);
+  vA = aA * clamp(1.0 - (-p.z - 17.0) * 0.3, 0.3, 1.0);
   gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
 }
 """
