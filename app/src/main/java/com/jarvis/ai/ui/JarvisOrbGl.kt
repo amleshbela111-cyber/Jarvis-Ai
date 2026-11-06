@@ -130,12 +130,12 @@ private object M {
 // ---------- colours (same hex values as the original) ----------
 private fun hex(h: Int): FloatArray = floatArrayOf(((h shr 16) and 255) / 255f, ((h shr 8) and 255) / 255f, (h and 255) / 255f)
 
-private val C_ORANGE = hex(0xC8500F)
+private val C_ORANGE = hex(0xB8430E)
 private val C_ORANGE_DARK = hex(0x7A2A08)
-private val C_ORANGE_GLOW = hex(0xFF8A2A)
-private val C_GOLD = hex(0xE8A03A)
+private val C_ORANGE_GLOW = hex(0xD8501A)
+private val C_GOLD = hex(0xA8681E)
 private val C_CORE = hex(0xB8501A)
-private val C_PARTICLE = hex(0xFF9A3A)
+private val C_PARTICLE = hex(0xC0581C)
 private val C_BODY = hex(0x140701)
 private val C_CORE_HOT = hex(0xFFF0C0)
 
@@ -150,7 +150,7 @@ varying float vFade;
 void main(){
   vec4 p = uMV * vec4(aPos, 1.0);
   gl_Position = uProj * p;
-  vFade = clamp(1.0 - (-p.z - 7.5) * 0.3, 0.3, 1.0);
+  vFade = clamp(1.0 - (-p.z - 17f) * 0.3, 0.3, 1.0);
   gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
 }
 """
@@ -182,7 +182,7 @@ varying float vA;
 void main(){
   vec4 p = uMV * vec4(aPos, 1.0);
   gl_Position = uProj * p;
-  vA = aA * clamp(1.0 - (-p.z - 7.5) * 0.3, 0.3, 1.0);
+  vA = aA * clamp(1.0 - (-p.z - 17f) * 0.3, 0.3, 1.0);
   gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
 }
 """
@@ -769,7 +769,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val aCorner = spriteP.a("aCorner")
         GL.glEnableVertexAttribArray(aCorner)
         GL.glVertexAttribPointer(aCorner, 2, GL.GL_FLOAT, false, 0, 0)
-        GL.glUniform3f(spriteP.u("uCenter"), 0f, 0f, -8.5f)
+        GL.glUniform3f(spriteP.u("uCenter"), 0f, 0f, -18f)
         GL.glUniform1f(spriteP.u("uSize"), size * 0.5f)
         GL.glUniformMatrix4fv(spriteP.u("uProj"), 1, false, proj, 0)
         GL.glUniform1f(spriteP.u("uOpacity"), opacity)
@@ -794,11 +794,11 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val s = state
         val lvl = level.coerceIn(0f, 1f)
         targetScale = when (s) {
-            JarvisState.SPEAKING -> 1.2f
+            JarvisState.SPEAKING -> 1.6f
             JarvisState.LISTENING -> 0.8f + lvl * 0.2f
             else -> 1f
         }
-        val speakPulse = if (s == JarvisState.SPEAKING) sin(t * 9f) * 0.04f else 0f
+        val speakPulse = if (s == JarvisState.SPEAKING) sin(t * 9f) * 0.08f else 0f
         curScale += (targetScale + speakPulse - curScale) * 0.08f
 
         val pulse = 1f + sin(t * 2.1f) * 0.05f
@@ -809,7 +809,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val dy = dragY
         val orbE = M.euler(sin(t * 0.22f) * 0.12f + dx, t * 0.13f + dy, sin(t * 0.15f) * 0.08f)
         val morb = M.mul(orbE, M.scl(curScale))
-        val view = M.trans(0f, 0f, -8.5f)
+        val view = M.trans(0f, 0f, -18f)
         val base = M.mul(view, morb)
 
         updateEmbers(t)
@@ -894,8 +894,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1i(compP.u("uScene"), 0)
         GL.glUniform1i(compP.u("uBloom"), 1)
         GL.glUniform1i(compP.u("uWide"), 2)
-        GL.glUniform1f(compP.u("uStrength"), 1.4f)
-        GL.glUniform1f(compP.u("uWideStrength"), 0.9f)
+        GL.glUniform1f(compP.u("uStrength"), 0.7f)
+        GL.glUniform1f(compP.u("uWideStrength"), 0.4f)
         GL.glActiveTexture(GL.GL_TEXTURE1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, blurB.tex)
         GL.glActiveTexture(GL.GL_TEXTURE2)
