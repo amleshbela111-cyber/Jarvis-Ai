@@ -38,13 +38,18 @@ fun JarvisOrbGl(
     state: JarvisState,
     soundLevel: Float,
     modifier: Modifier = Modifier,
-    onTap: () -> Unit = {}
+    onTap: () -> Unit = {},
+    onLongPress: () -> Unit = {}
 ) {
     val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
     AndroidView(
         modifier = modifier.size(300.dp),
         factory = { ctx ->
-            OrbGlView(ctx).apply { onTapCallback = { currentOnTap() } }
+            OrbGlView(ctx).apply {
+                onTapCallback = { currentOnTap() }
+                onLongPressCallback = { currentOnLongPress() }
+            }
         },
         update = { view -> view.setOrbState(state, soundLevel) }
     )
@@ -52,7 +57,11 @@ fun JarvisOrbGl(
 
 class OrbGlView(context: Context) : GLSurfaceView(context) {
     var onTapCallback: (() -> Unit)? = null
-    private val renderer = OrbRenderer { mainHandler.post { onTapCallback?.invoke() } }
+    var onLongPressCallback: (() -> Unit)? = null
+    private val renderer = OrbRenderer(
+        { mainHandler.post { onTapCallback?.invoke() } },
+        { mainHandler.post { onLongPressCallback?.invoke() } }
+    )
     private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
@@ -459,7 +468,15 @@ private fun ss(a: Float, b: Float, x: Float): Float {
 
 private fun dist(dx: Float, dy: Float): Float = sqrt(dx * dx + dy * dy)
 
-private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Renderer {
+private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress: () -> Unit) : GLSurfaceView.Renderer {
+    private val touchHandler = Handler(Looper.getMainLooper())
+    private var longPressed = false
+    private val longPressRunnable = Runnable {
+        if (dragging && !moved) {
+            longPressed = true
+            onLongPress()
+        }
+    }
     @Volatile var state: JarvisState = JarvisState.IDLE
     @Volatile var level: Float = 0f
     @Volatile var density: Float = 1f
@@ -521,21 +538,30 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     fun onTouch(action: Int, x: Float, y: Float) {
         when (action) {
             MotionEvent.ACTION_DOWN -> {
-                dragging = true; moved = false
+                dragging = true; moved = false; longPressed = false
                 px = x; py = y; downX = x; downY = y
+                touchHandler.removeCallbacks(longPressRunnable)
+                touchHandler.postDelayed(longPressRunnable, 600L)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!dragging) return
-                if (dist(x - downX, y - downY) >= 8f * density) moved = true
+                if (dist(x - downX, y - downY) >= 8f * density) {
+                    moved = true
+                    touchHandler.removeCallbacks(longPressRunnable)
+                }
                 dragY += (x - px) * 0.004f / density
                 dragX += (y - py) * 0.004f / density
                 px = x; py = y
             }
             MotionEvent.ACTION_UP -> {
-                if (dragging && !moved && dist(x - downX, y - downY) < 8f * density) onTap()
+                touchHandler.removeCallbacks(longPressRunnable)
+                if (dragging && !moved && !longPressed && dist(x - downX, y - downY) < 8f * density) onTap()
                 dragging = false
             }
-            MotionEvent.ACTION_CANCEL -> dragging = false
+            MotionEvent.ACTION_CANCEL -> {
+                touchHandler.removeCallbacks(longPressRunnable)
+                dragging = false
+            }
         }
     }
 

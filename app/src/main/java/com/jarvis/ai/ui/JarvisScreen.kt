@@ -1,5 +1,7 @@
 package com.jarvis.ai.ui
 
+import com.jarvis.ai.camera.LiveCameraScreen
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -79,6 +82,27 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     val context = LocalContext.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showSetup by rememberSaveable { mutableStateOf(false) }
+    var showCamera by rememberSaveable { mutableStateOf(false) }
+    val navRequest by ScreenNav.request.collectAsState()
+    LaunchedEffect(navRequest) {
+        when (navRequest) {
+            "settings" -> showSettings = true
+            "setup" -> showSetup = true
+            "camera" -> showCamera = true
+            "system_camera" -> {
+                try {
+                    context.startActivity(
+                        android.content.Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {
+                    // No camera app on this phone. Nothing else to open.
+                }
+            }
+            "camera_off" -> showCamera = false
+        }
+        if (navRequest != null) ScreenNav.request.value = null
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -148,6 +172,8 @@ fun JarvisApp(viewModel: JarvisViewModel) {
                 onStopScreenCapture = { ScreenCaptureService.stop(context) },
                 onAutomationToggle = viewModel::setAutomationPaused
             )
+        } else if (showCamera) {
+            LiveCameraScreen(onClose = { showCamera = false })
         } else {
             JarvisHome(
                 ui = ui,
@@ -175,12 +201,27 @@ private fun JarvisHome(
     onStop: () -> Unit
 ) {
     // The screen shows only the orb. Tapping it turns the mic on or off.
+    var showMenu by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().background(JarvisBackground)) {
         JarvisOrbGl(
             state = ui.state,
             soundLevel = ui.soundLevel,
             modifier = Modifier.fillMaxSize(),
-            onTap = onMicClick
+            onTap = onMicClick,
+            onLongPress = { showMenu = true }
+        )
+    }
+    if (showMenu) {
+        AlertDialog(
+            onDismissRequest = { showMenu = false },
+            title = { Text("Kya kholna hai?") },
+            text = null,
+            confirmButton = {
+                TextButton(onClick = { showMenu = false; onOpenSettings() }) { Text("Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMenu = false; onOpenSetup() }) { Text("Setup") }
+            }
         )
     }
 }

@@ -90,6 +90,13 @@ class VoiceController(
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, language.tag)
+            // Auto-detect Hindi or English when the phone supports it (Android 14+). Older phones keep the chosen language.
+            runCatching {
+                val enable = RecognizerIntent::class.java.getField("EXTRA_ENABLE_LANGUAGE_DETECTION").get(null) as String
+                val allowed = RecognizerIntent::class.java.getField("EXTRA_LANGUAGE_DETECTION_ALLOWED_LANGUAGES").get(null) as String
+                putExtra(enable, true)
+                putExtra(allowed, arrayListOf("en-IN", "hi-IN"))
+            }
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, appContext.packageName)
