@@ -130,12 +130,13 @@ private object M {
 // ---------- colours (same hex values as the original) ----------
 private fun hex(h: Int): FloatArray = floatArrayOf(((h shr 16) and 255) / 255f, ((h shr 8) and 255) / 255f, (h and 255) / 255f)
 
-private val C_ORANGE = hex(0xFF6A12)
-private val C_ORANGE_DARK = hex(0xB8430C)
-private val C_ORANGE_GLOW = hex(0xFF8A2A)
-private val C_GOLD = hex(0xFFB344)
-private val C_CORE = hex(0xFF7A1E)
-private val C_PARTICLE = hex(0xFF9A3A)
+private val C_ORANGE = hex(0xC8500F)
+private val C_ORANGE_DARK = hex(0x7A2A08)
+private val C_ORANGE_GLOW = hex(0xD65E1C)
+private val C_GOLD = hex(0x9C6420)
+private val C_CORE = hex(0xB8501A)
+private val C_PARTICLE = hex(0xB85A1E)
+private val C_BODY = hex(0x140701)
 private val C_CORE_HOT = hex(0xFFF0C0)
 
 // ---------- shaders (same as the WebGL version) ----------
@@ -166,6 +167,35 @@ void main(){
     if (r > 1.0) discard;
     a *= 1.0 - smoothstep(0.3, 1.0, r);
   }
+  gl_FragColor = vec4(uColor.rgb, a);
+}
+"""
+
+private const val VS_EMBER = """
+attribute vec3 aPos;
+attribute float aA;
+uniform mat4 uMV;
+uniform mat4 uProj;
+uniform float uPointSize;
+uniform float uPxScale;
+varying float vA;
+void main(){
+  vec4 p = uMV * vec4(aPos, 1.0);
+  gl_Position = uProj * p;
+  vA = aA * clamp(1.0 - (-p.z - 7.5) * 0.3, 0.3, 1.0);
+  gl_PointSize = uPointSize * uPxScale / max(-p.z, 0.1);
+}
+"""
+
+private const val FS_EMBER = """
+precision mediump float;
+uniform vec4 uColor;
+varying float vA;
+void main(){
+  float r = length(gl_PointCoord - 0.5) * 2.0;
+  if (r > 1.0) discard;
+  float a = uColor.a * vA * (1.0 - smoothstep(0.2, 1.0, r));
+  if (a <= 0.001) discard;
   gl_FragColor = vec4(uColor.rgb, a);
 }
 """
@@ -412,6 +442,17 @@ private fun loopGeo(points: List<FloatArray>): Geo {
     return makeGeo(verts, null, points.size)
 }
 
+private fun xf(m: FloatArray, v: FloatArray): FloatArray = floatArrayOf(
+    m[0] * v[0] + m[4] * v[1] + m[8] * v[2],
+    m[1] * v[0] + m[5] * v[1] + m[9] * v[2],
+    m[2] * v[0] + m[6] * v[1] + m[10] * v[2]
+)
+
+private fun ss(a: Float, b: Float, x: Float): Float {
+    val t = ((x - a) / (b - a)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
 private fun dist(dx: Float, dy: Float): Float = sqrt(dx * dx + dy * dy)
 
 private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Renderer {
@@ -433,7 +474,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     private lateinit var compP: Prog
     private lateinit var coreG: Geo
     private lateinit var quadG: Geo
-    private lateinit var particleBuf: Geo
+    private lateinit var emberP: Prog
     private lateinit var rings: List<Ring>
     private lateinit var strands: List<Strand>
     private lateinit var beams: List<Beam>
@@ -443,14 +484,21 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
     private lateinit var quarterA: Target
     private lateinit var quarterB: Target
 
-    private val COUNT = 9000
-    private val pPos = FloatArray(COUNT * 3)
-    private val pSpeed = FloatArray(COUNT)
-    private val pPhase = FloatArray(COUNT)
-    private val pDrift = FloatArray(COUNT)
-    private val pTheta = FloatArray(COUNT)
-    private val pPhi = FloatArray(COUNT)
-    private val pRadius = FloatArray(COUNT)
+    // Sparks: each one lights up slowly on a ring, lifts off, scatters, then fades out.
+    private val EN = 420
+    private val eBuf = FloatArray(EN * 4)     // x, y, z, alpha (interleaved)
+    private val eBase = FloatArray(EN * 3)
+    private val eTan = FloatArray(EN * 3)
+    private val eDir = FloatArray(EN * 3)
+    private val eLife = FloatArray(EN)
+    private val eAge = FloatArray(EN)
+    private val eDelay = FloatArray(EN)
+    private val ePhase = FloatArray(EN)
+    private var eBufId = 0
+    private var lastT = 0f
+    private val emberRing = floatArrayOf(1.22f, 1.48f)
+    private val emberArc = floatArrayOf(PI.toFloat() * 2f, PI.toFloat() * 1.5f)
+    private val emberTilt = arrayOf(M.euler(1.12f, 0.25f, 0.1f), M.euler(0.72f, 1f, 0.4f))
     private var pBufId = 0
 
     // Touch state (drag turns the orb, a tap toggles the mic).
@@ -492,67 +540,87 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         spriteP = Prog(VS_SPRITE, FS_SPRITE)
         blurP = Prog(VS_FULL, FS_BLUR)
         compP = Prog(VS_FULL, FS_COMP)
+        emberP = Prog(VS_EMBER, FS_EMBER)
 
-        coreG = sphereGeo(0.105f, 24, 32)
+        coreG = sphereGeo(0.74f, 32, 48)   // dark body that hides the far side
         quadG = makeGeo(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f), null, 4)
 
         rings = listOf(
-            Ring(torusGeo(1.12f, 0.02f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
-            Ring(torusGeo(1.36f, 0.026f, 16, 300, (PI * 1.6).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, -0.09f),
-            Ring(torusGeo(1.58f, 0.032f, 16, 300, (PI * 1.3).toFloat()), floatArrayOf(1.35f, 0.4f, 0.7f), C_ORANGE, 0.12f)
+            Ring(torusGeo(1.22f, 0.018f, 16, 300, (PI * 2).toFloat()), floatArrayOf(1.12f, 0.25f, 0.1f), C_ORANGE_GLOW, 0.1f),
+            Ring(torusGeo(1.48f, 0.024f, 16, 300, (PI * 1.5).toFloat()), floatArrayOf(0.72f, 1f, 0.4f), C_GOLD, -0.09f)
         )
 
-        // Inner wireframe: 24 great circles spread evenly, plus 7 latitude rings.
+        // Inner wireframe: slightly wobbly latitude/longitude lines, plus loose great circles at random tilts.
         val sr = 0.76f
         val list = ArrayList<Strand>()
-        // Latitude circles around the Y axis, and the same circles around the X axis.
-        // Every circle of one set crosses every circle of the other at 90 degrees. No poles.
-        val parallels = 27
+        val parallels = 21
         for (k in 1..parallels) {
-            val lat = k.toFloat() / (parallels + 1) * PI.toFloat()
+            val lat = k.toFloat() / (parallels + 1) * PI.toFloat() + (Random.nextFloat() - 0.5f) * 0.09f
             val r = sr * sin(lat)
             val h = sr * cos(lat)
+            val wob = Random.nextFloat() * 6.28f
             val ptsY = ArrayList<FloatArray>()
             val ptsX = ArrayList<FloatArray>()
             for (j in 0 until 240) {
                 val ang = j.toFloat() / 240f * PI.toFloat() * 2f
-                ptsY.add(floatArrayOf(r * cos(ang), h, r * sin(ang)))
-                ptsX.add(floatArrayOf(h, r * cos(ang), r * sin(ang)))
+                val rr = r * (1f + 0.02f * sin(ang * 3f + wob))
+                ptsY.add(floatArrayOf(rr * cos(ang), h, rr * sin(ang)))
+                ptsX.add(floatArrayOf(h, rr * cos(ang), rr * sin(ang)))
             }
-            list.add(Strand(tubeGeo(ptsY, true, 0.0045f), C_GOLD, 0.85f))
-            list.add(Strand(tubeGeo(ptsX, true, 0.0045f), C_ORANGE_GLOW, 0.85f))
+            list.add(Strand(tubeGeo(ptsY, true, 0.0042f), C_GOLD, 0.45f + Random.nextFloat() * 0.35f))
+            list.add(Strand(tubeGeo(ptsX, true, 0.0042f), C_ORANGE_GLOW, 0.45f + Random.nextFloat() * 0.35f))
+        }
+        for (k in 0 until 14) {
+            val n = norm(floatArrayOf(Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f))
+            val tmp = if (abs(n[1]) > 0.9f) floatArrayOf(1f, 0f, 0f) else floatArrayOf(0f, 1f, 0f)
+            val u = norm(cross(n, tmp))
+            val v = cross(n, u)
+            val closed = k % 2 == 0
+            val cut = if (closed) 1f else 0.55f + Random.nextFloat() * 0.4f
+            val seg = 160
+            val pts = ArrayList<FloatArray>()
+            for (j in 0 until seg) {
+                val a = j.toFloat() / seg * 2f * PI.toFloat() * cut
+                pts.add(floatArrayOf(
+                    sr * (cos(a) * u[0] + sin(a) * v[0]),
+                    sr * (cos(a) * u[1] + sin(a) * v[1]),
+                    sr * (cos(a) * u[2] + sin(a) * v[2])
+                ))
+            }
+            val col = listOf(C_ORANGE, C_ORANGE_GLOW, C_GOLD)[k % 3]
+            list.add(Strand(tubeGeo(pts, closed, 0.0032f), col, 0.35f + Random.nextFloat() * 0.35f))
         }
         strands = list
 
-        // Radial beams (random tilt, like the original).
+        // Beams spread evenly over the whole sphere (golden-angle spiral), not bunched in one place.
         val bl = ArrayList<Beam>()
-        for (i in 0 until 16) {
-            val angle = i * PI.toFloat() * 2f / 11f
-            val len = 1.6f + Random.nextFloat() * 0.3f
-            val d = norm(floatArrayOf(cos(angle), sin(angle), (Random.nextFloat() - 0.5f) * 0.5f))
+        val nB = 26
+        val golden = PI.toFloat() * (3f - sqrt(5f))
+        for (i in 0 until nB) {
+            val y = 1f - 2f * (i + 0.5f) / nB
+            val rr = sqrt(1f - y * y)
+            val th = golden * i
+            val d = floatArrayOf(cos(th) * rr, y, sin(th) * rr)
+            val len = 1.45f + Random.nextFloat() * 0.7f
             val bp = listOf(
                 floatArrayOf(d[0] * 0.1f, d[1] * 0.1f, d[2] * 0.1f),
                 floatArrayOf(d[0] * len, d[1] * len, d[2] * len)
             )
-            bl.add(Beam(tubeGeo(bp, false, 0.012f), if (i % 2 == 1) C_ORANGE else C_GOLD))
+            bl.add(Beam(tubeGeo(bp, false, if (i % 3 == 0) 0.011f else 0.007f), if (i % 2 == 1) C_ORANGE else C_GOLD))
         }
         beams = bl
+        beams = bl
 
-        // Particles: positions are updated on the CPU and uploaded every frame.
-        for (i in 0 until COUNT) {
-            pTheta[i] = Random.nextFloat() * PI.toFloat() * 2f
-            pPhi[i] = kotlin.math.acos(2f * Random.nextFloat() - 1f)
-            pRadius[i] = 1.0f + Random.nextFloat() * 0.9f
-            pSpeed[i] = 0.12f + Random.nextFloat() * 0.65f
-            pPhase[i] = Random.nextFloat() * PI.toFloat() * 2f
-            pDrift[i] = (Random.nextFloat() - 0.5f) * 0.16f
+        // Sparks start at random points in their cycle, so they do not all move together.
+        for (i in 0 until EN) {
+            spawnEmber(i)
+            ePhase[i] = Random.nextFloat() * PI.toFloat() * 2f
         }
-        val pb = IntArray(1)
-        GL.glGenBuffers(1, pb, 0)
-        pBufId = pb[0]
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, pBufId)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, pPos.size * 4, null, GL.GL_DYNAMIC_DRAW)
-        particleBuf = Geo(pBufId, COUNT)
+        val eb = IntArray(1)
+        GL.glGenBuffers(1, eb, 0)
+        eBufId = eb[0]
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, eBufId)
+        GL.glBufferData(GL.GL_ARRAY_BUFFER, eBuf.size * 4, null, GL.GL_DYNAMIC_DRAW)
 
         GL.glDisable(GL.GL_CULL_FACE)
     }
@@ -593,17 +661,73 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         return Target(fb[0], tex[0], w, h)
     }
 
-    private fun updateParticles(t: Float) {
-        for (i in 0 until COUNT) {
-            val theta = pTheta[i] + t * pSpeed[i] * 0.32f
-            val phi = pPhi[i] + sin(t * 0.4f + pPhase[i]) * pDrift[i]
-            val r = pRadius[i] + sin(t * 1.8f + pPhase[i]) * 0.025f
-            pPos[i * 3] = r * sin(phi) * cos(theta)
-            pPos[i * 3 + 1] = r * sin(phi) * sin(theta)
-            pPos[i * 3 + 2] = r * cos(phi)
+    private fun spawnEmber(i: Int) {
+        val ring = Random.nextInt(2)
+        val a = Random.nextFloat() * emberArc[ring]
+        val rad = emberRing[ring]
+        val b = xf(emberTilt[ring], floatArrayOf(rad * cos(a), 0f, rad * sin(a)))
+        val tg = xf(emberTilt[ring], floatArrayOf(-sin(a), 0f, cos(a)))
+        val sign = if (Random.nextBoolean()) 1f else -1f
+        val out = norm(b)
+        val rnd = norm(floatArrayOf(Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f, Random.nextFloat() - 0.5f))
+        val d = norm(floatArrayOf(out[0] * 0.7f + rnd[0] * 0.5f, out[1] * 0.7f + rnd[1] * 0.5f, out[2] * 0.7f + rnd[2] * 0.5f))
+        for (k in 0..2) {
+            eBase[i * 3 + k] = b[k]
+            eTan[i * 3 + k] = tg[k] * sign
+            eDir[i * 3 + k] = d[k]
         }
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, pBufId)
-        GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, pPos.size * 4, floatBuf(pPos))
+        eLife[i] = 6f + Random.nextFloat() * 4f
+        eAge[i] = 0f
+        eDelay[i] = Random.nextFloat() * 4f
+    }
+
+    private fun updateEmbers(t: Float) {
+        val dt = (t - lastT).coerceIn(0f, 0.1f)
+        lastT = t
+        for (i in 0 until EN) {
+            if (eDelay[i] > 0f) {
+                eDelay[i] -= dt
+                eBuf[i * 4 + 3] = 0f
+                continue
+            }
+            eAge[i] += dt
+            if (eAge[i] >= eLife[i]) {
+                spawnEmber(i)
+                continue
+            }
+            val u = eAge[i] / eLife[i]
+            // Slow light-up on the ring, then lift off and scatter, then a slow fade.
+            val fade = ss(0f, 0.22f, u) * (1f - ss(0.6f, 1f, u))
+            val twinkle = 0.85f + 0.15f * sin(t * 3f + ePhase[i])
+            val sc = maxOf(u - 0.3f, 0f)
+            val scatter = sc * sc * 1.8f
+            val drift = eAge[i] * 0.12f
+            for (k in 0..2) {
+                eBuf[i * 4 + k] = eBase[i * 3 + k] + eTan[i * 3 + k] * drift + eDir[i * 3 + k] * scatter
+            }
+            eBuf[i * 4 + 3] = fade * twinkle
+        }
+    }
+
+    private fun drawEmbers(mv: FloatArray) {
+        GL.glUseProgram(emberP.id)
+        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, eBufId)
+        GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, eBuf.size * 4, floatBuf(eBuf))
+        val aPos = emberP.a("aPos")
+        val aA = emberP.a("aA")
+        GL.glEnableVertexAttribArray(aPos)
+        GL.glVertexAttribPointer(aPos, 3, GL.GL_FLOAT, false, 16, 0)
+        GL.glEnableVertexAttribArray(aA)
+        GL.glVertexAttribPointer(aA, 1, GL.GL_FLOAT, false, 16, 12)
+        GL.glUniformMatrix4fv(emberP.u("uMV"), 1, false, mv, 0)
+        GL.glUniformMatrix4fv(emberP.u("uProj"), 1, false, proj, 0)
+        GL.glUniform1f(emberP.u("uPxScale"), pxScale)
+        val c = lin(C_PARTICLE)
+        GL.glUniform4f(emberP.u("uColor"), c[0], c[1], c[2], 1f)
+        GL.glUniform1f(emberP.u("uPointSize"), 0.03f)
+        GL.glDrawArrays(GL.GL_POINTS, 0, EN)
+        GL.glUniform1f(emberP.u("uPointSize"), 0.014f)
+        GL.glDrawArrays(GL.GL_POINTS, 0, EN)
     }
 
     private fun drawMesh(g: Geo, mv: FloatArray, c: FloatArray, alpha: Float, mode: Int, psize: Float, round: Boolean) {
@@ -682,7 +806,7 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         val view = M.trans(0f, 0f, -8.5f)
         val base = M.mul(view, morb)
 
-        updateParticles(t)
+        updateEmbers(t)
 
         // Scene pass into an offscreen target.
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, sceneT.fb)
@@ -691,21 +815,23 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glClear(GL.GL_COLOR_BUFFER_BIT or GL.GL_DEPTH_BUFFER_BIT)
         GL.glEnable(GL.GL_DEPTH_TEST)
 
-        // Core: solid, drawn first.
+        // Dark body drawn first: it hides the lines on the far side, which gives the orb depth.
         GL.glDisable(GL.GL_BLEND)
         GL.glDepthMask(true)
-        drawMesh(coreG, M.mul(base, M.scl(pulse)), C_CORE_HOT, 1f, GL.GL_TRIANGLES, 0f, false)
+        drawMesh(coreG, base, C_BODY, 1f, GL.GL_TRIANGLES, 0f, false)
 
         // Everything else glows: additive blending, no depth writes.
         GL.glEnable(GL.GL_BLEND)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE)
         GL.glDepthMask(false)
 
-        drawSprite(glowCore * curScale, 0.9f)
-        drawSprite(glowInner * curScale, 0.48f)
-        drawSprite(glowCore * curScale * 1.6f, 0.3f)
-        drawSprite(glowCore * curScale * 2.4f, 0.55f)
-        drawSprite(glowCore * curScale * 0.7f, 1f)
+        // Centre glow, breathing and fading out at the edges. No depth test, so it shows over the body.
+        GL.glDisable(GL.GL_DEPTH_TEST)
+        drawSprite(glowCore * curScale * 2.4f, 0.22f)
+        drawSprite(glowCore * curScale * 1.5f, 0.32f)
+        drawSprite(glowInner * curScale * 0.7f, 0.5f)
+        drawSprite(glowCore * curScale * 0.45f, 0.4f)
+        GL.glEnable(GL.GL_DEPTH_TEST)
 
         for (r in rings) {
             val ringE = M.euler(r.base[0], r.base[1], r.base[2] + r.speed * t * 0.06f)
@@ -716,11 +842,10 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         for (st in strands) halo(st.g, strandMv, st.color, st.alpha, GL.GL_TRIANGLES)
 
         val beamMv = M.mul(base, M.euler(0f, t * 0.07f, 0f))
-        for (b in beams) halo(b.g, beamMv, b.color, 0.9f, GL.GL_TRIANGLES)
+        for (b in beams) halo(b.g, beamMv, b.color, 0.75f, GL.GL_TRIANGLES)
 
         val partMv = M.mul(base, M.euler(0f, -t * 0.06f, 0f))
-        drawMesh(particleBuf, partMv, C_PARTICLE, 0.35f, GL.GL_POINTS, 0.026f, false)
-        drawMesh(particleBuf, partMv, C_PARTICLE, 0.9f, GL.GL_POINTS, 0.014f, false)
+        drawEmbers(partMv)
 
         // Bloom: bright parts blurred at half size, then a wide halo at quarter size.
         GL.glDisable(GL.GL_BLEND)
@@ -761,8 +886,8 @@ private class OrbRenderer(private val onTap: () -> Unit) : GLSurfaceView.Rendere
         GL.glUniform1i(compP.u("uScene"), 0)
         GL.glUniform1i(compP.u("uBloom"), 1)
         GL.glUniform1i(compP.u("uWide"), 2)
-        GL.glUniform1f(compP.u("uStrength"), 0.9f)
-        GL.glUniform1f(compP.u("uWideStrength"), 0.6f)
+        GL.glUniform1f(compP.u("uStrength"), 0.6f)
+        GL.glUniform1f(compP.u("uWideStrength"), 0.35f)
         GL.glActiveTexture(GL.GL_TEXTURE1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, blurB.tex)
         GL.glActiveTexture(GL.GL_TEXTURE2)
