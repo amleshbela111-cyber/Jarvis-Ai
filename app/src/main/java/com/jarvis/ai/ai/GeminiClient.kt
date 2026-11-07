@@ -46,6 +46,50 @@ class GeminiClient {
         throw lastError ?: IOException("Gemini did not answer")
     }
 
+    /**
+     * Asks Gemini's image model for a picture. Returns the picture as base64 (PNG or JPEG), or null when
+     * the model cannot make one. Used as the reference picture before the 3D code is written.
+     */
+    suspend fun generateImage(apiKey: String, prompt: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val connection = (URL("$BASE_URL/$IMAGE_MODEL:generateContent").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = CONNECT_TIMEOUT_MS
+                readTimeout = LONG_READ_MS
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json")
+                setRequestProperty("x-goog-api-key", apiKey)
+            }
+            try {
+                val body = JSONObject().apply {
+                    put("contents", JSONArray().put(
+                        JSONObject().put("role", "user")
+                            .put("parts", JSONArray().put(JSONObject().put("text", prompt)))
+                    ))
+                    put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("TEXT").put("IMAGE")))
+                }.toString()
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) return@withContext null
+                val parts = JSONObject(text).optJSONArray("candidates")
+                    ?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                    ?: return@withContext null
+                for (i in 0 until parts.length()) {
+                    val inline = parts.getJSONObject(i).optJSONObject("inlineData") ?: continue
+                    val data = inline.optString("data")
+                    if (data.isNotEmpty()) return@withContext data
+                }
+                null
+            } finally {
+                connection.disconnect()
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /** Timeouts, busy servers (429, 500, 502, 503, 504) and dropped connections are worth one more try. */
     private fun isTemporary(e: IOException): Boolean {
         if (e is java.net.SocketTimeoutException || e is java.net.ConnectException) return true
@@ -154,6 +198,8 @@ class GeminiClient {
     private companion object {
         const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
         const val FALLBACK_MODEL = "gemini-3.6-flash"
+        // Model that can draw pictures. If the key has no access to it, the walkthrough falls back to text only.
+        const val IMAGE_MODEL = "gemini-2.5-flash-image"
         const val CONNECT_TIMEOUT_MS = 8_000
         const val PRIMARY_READ_MS = 15_000
         const val FALLBACK_READ_MS = 15_000

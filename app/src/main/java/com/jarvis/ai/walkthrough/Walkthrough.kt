@@ -67,34 +67,54 @@ Shapes:
   - api.onFrame(function(api, t, dt) {...}) runs every frame. t is seconds since the script started.
   - api.overlay(function(ctx, t, w, h) {...}) draws 2D on top of the scene with the canvas context ctx (w and h are the screen size in pixels). Use it for 2D diagrams, text, arrows and graphs.
   - api.say("text") speaks a line.
-  - api.surface(function(u, v) { return [x, y, z]; }, {name, label, color, metal, rough, res: 40}) builds a smooth, curved 3D surface from a formula. u and v go from 0 to 1. Use it for organic and curved parts: heart muscle walls, a bulging chamber, a curved aorta, a petal, a leaf, a bottle, a body outline. Write the real shape with math (sin, cos, exp, and so on), and make it as close to the real object as you can.
+  - api.surface(function(u, v) { return [x, y, z]; }, {name, label, color, metal, rough, res: 40}) builds a smooth, curved 3D surface from a formula. u and v go from 0 to 1. Use it for organic and curved parts of ANY subject: a petal, a leaf, a bottle, a car body, a wing, a bridge arch, a shell, a planet's bulge, a river bend, a lens. Write the real shape with math (sin, cos, exp, and so on), and make it as close to the real object as you can.
   - api.tube(function(t) { return [x, y, z]; }, {name, label, r: 0.05, color, metal, rough}) makes a round tube that follows a curve, for t from 0 to 1. Use it for vessels, pipes, nerves and bent wires.
-  Always try for a realistic result. Even if a detail is hard, make the best approximation and use the part's real colour and material.
+  Always try for a realistic result, for whatever the subject is. Even if a detail is hard, make the best approximation and use the part's real colour and material.
   Rules: plain JavaScript only, no fetch, no imports, no while(true) loops, no waiting. Keep the script under 120 lines. Use Math for motion, for example pos[1] = 0.3 * Math.sin(t * 2).
 - Full list of shape names: sphere, hemisphere, cylinder, cone, frustum, cube, box, cuboid, pyramid, pentpyramid, hexpyramid, tetrahedron, octahedron, icosahedron, dodecahedron, prism, pentprism, hexprism, torus, capsule, ellipsoid, disc, arrow, tube, circle2d, ring2d, rect2d, square2d, triangle2d, pentagon2d, hexagon2d, octagon2d, star2d, diamond2d, trapezoid2d, parallelogram2d, semicircle2d.
 Rules:
 - Use 25 to 60 parts and 6 to 12 steps. Enough parts to show the real structure: chambers, valves, vessels, main organs, connections.
+- The subject is ONLY what the user asked for (their question is in the user message). Build that exact subject, from its real structure. Never substitute a different subject, and never default to the human body, the heart or any organ unless the question asks for it. Examples of the range: an engine, a solar system, a plant cell, a circuit, a bridge, a camera lens, a volcano, a house, a water cycle, a molecule, a computer, a tree.
 - Centre the subject near 0,0,0, no wider than about 4 units.
 - Give every part a unique name and a short label. Use a warm colour palette: oranges, reds, golds, with a darker red for deeper parts.
 - Steps go in teaching order: overall view, then each main part with its function, then how the parts connect and flow, then a short summary step.
 - Use "explode" in a later step to pull parts apart and show what sits inside, with a suitable "dir" per part.
 - If the photo is only a document or text page, return "parts": [] and make the steps narrate its key points one by one, with "say" only, in clear Hinglish.
 - Keep narration accurate. Do not invent facts that are not in the subject or the photo.
-- Realism matters. Use real-world colours and materials: organ or flesh red like #8a2a22 with rough 0.4, bone #e6dcc3 with rough 0.6, blood vessels deep red #6e0f12 or blue #22346e for veins, metal #b9bcc4 with metal 1 and rough 0.25, plastic or rubber in the real colour with metal 0 and rough 0.5, wood #8a5a2b with rough 0.7. Avoid neon colours unless the subject is really neon.
+- Realism matters. Pick the real colours and materials of THIS subject: metal #b9bcc4 with metal 1 and rough 0.25 (steel, engines, machines), dark iron #3a3d44 with metal 1 and rough 0.4, plastic or rubber in the real colour with metal 0 and rough 0.5, glass or water with a pale tint and rough 0.05, wood #8a5a2b with rough 0.7 and bump 0.4, stone or concrete grey with rough 0.9 and bump 0.3, leaves green with bump 0.3, and for living tissue (only when the subject is biology) flesh red #8a2a22 with rough 0.4 and bump 0.4. Avoid neon colours unless the subject is really neon.
+- Make the object look like the real thing: correct proportions, several pieces per part (body, rim, cap, fins, bolts), and a clear layout the user can read.
 - Use good proportions, and build each part from several pieces (a body, a rim, a cap) so it looks like the real object.
 - For detail that a plain shape cannot show, use the "script" with api.add to add small parts, or api.overlay for labels and arrows."""
 
     suspend fun build(apiKey: String, model: String, question: String, images: List<String>): String? {
+        val client = GeminiClient()
+        // Step 1: draw a reference picture of the subject with Gemini's image model (skipped when the camera has pictures).
+        val drawn = if (images.isEmpty()) {
+            client.generateImage(
+                apiKey,
+                "Draw a clear, realistic, accurate picture of this, as a textbook diagram seen from the front and slightly above, " +
+                    "centred on a plain light background, with real proportions and real colours and materials: $question"
+            )
+        } else null
+        // Step 2: write the 3D code. When a picture exists, the code must copy it as closely as possible.
+        val refImages = if (drawn != null) listOf(drawn) + images else images
+        val task = if (drawn != null) {
+            "User ka sawaal (yahi subject banana hai, koi aur nahi): $question\n" +
+                "The first picture is a reference drawing of the subject. Recreate that exact picture in 3D code: " +
+                "match its shapes, proportions, layout, colours and materials as closely as you can."
+        } else {
+            "User ka sawaal (yahi subject banana hai, koi aur nahi): $question"
+        }
         val raw = try {
-            GeminiClient().generate(
+            client.generate(
                 apiKey = apiKey,
                 model = model,
                 systemPrompt = SYSTEM,
-                userPrompt = "User ka sawaal: $question",
-                imageBase64 = images.firstOrNull(),
+                userPrompt = task,
+                imageBase64 = refImages.firstOrNull(),
                 expectJson = true,
                 maxTokens = 4096,
-                extraImages = images.drop(1)
+                extraImages = refImages.drop(1)
             )
         } catch (_: Exception) {
             return null
