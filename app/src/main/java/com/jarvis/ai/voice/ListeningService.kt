@@ -156,7 +156,7 @@ class ListeningService : Service(), VoiceController.Listener {
         }
         sessionActive = true
         val startedAt = System.currentTimeMillis()
-        val session = com.jarvis.ai.live.LiveVoice(key, JarvisCore.settings().geminiModel, LIVE_PROMPT) { msg ->
+        val session = com.jarvis.ai.live.LiveVoice(key, LIVE_MODEL, LIVE_PROMPT) { msg ->
             handler.post {
                 if (msg.contains("band")) {
                     live = null
@@ -302,6 +302,14 @@ class ListeningService : Service(), VoiceController.Listener {
             return
         }
 
+        // Silence sometimes comes back as text (like "thank you"). Those are not commands: keep listening quietly.
+        if (isNoise(heard)) {
+            sessionActive = false
+            JarvisCore.setPartial("")
+            if (!busy) scheduleRestart(RESTART_DELAY_MS)
+            return
+        }
+
         val awake = continuous || System.currentTimeMillis() < awakeUntil
         val command = if (awake) {
             heard
@@ -323,6 +331,25 @@ class ListeningService : Service(), VoiceController.Listener {
             return
         }
         JarvisCore.submit(command) { reply, speak -> speakReply(reply, speak) }
+    }
+
+    /** Text the recognizers invent from silence or background noise. */
+    private fun isNoise(text: String): Boolean {
+        val raw = text.trim().trim('.', '!', '?', ',', ' ', '।')
+        val s = raw.lowercase()
+        if (s.length < 2) return true
+        if (s.none { it.isLetterOrDigit() }) return true
+        if (s in NOISE_PHRASES) return true
+        // Random letter strings (like "Sjjshej" or "JSOHEJEK"): one long word with almost no vowels,
+        // or an all-capitals word, which speech engines only give for real acronyms. Known command words are kept.
+        if (' ' !in raw && raw.length >= 4 && s !in KNOWN_SHORT_WORDS) {
+            val letters = s.filter { it.isLetter() }
+            val vowels = letters.count { it in "aeiou" }
+            val allCaps = raw.all { !it.isLetter() || it.isUpperCase() } && raw.count { it.isLetter() } >= 5
+            if (allCaps) return true
+            if (letters.length >= 4 && vowels.toFloat() / letters.length < 0.4f) return true
+        }
+        return false
     }
 
     /**
@@ -449,6 +476,22 @@ class ListeningService : Service(), VoiceController.Listener {
         private const val NOTIFICATION_ID = 42
         private const val RESTART_DELAY_MS = 150L
         private const val LIVE_MIN_SESSION_MS = 5_000L
+
+        /** Phrases speech engines often produce from silence. "ok" and "haan" are NOT here: they are real replies. */
+        private val NOISE_PHRASES = setOf(
+            "thank you", "thanks", "thank you for watching", "thanks for watching",
+            "subscribe", "bye bye", "you", "music", "[music]", "(music)", "silence", "[silence]"
+        )
+
+        /** Single words that are real commands even though they look odd to the noise check. */
+        private val KNOWN_SHORT_WORDS = setOf(
+            "spotify", "youtube", "whatsapp", "instagram", "flashlight", "bluetooth", "wifi", "screenshot",
+            "chrome", "gmail", "calculator", "brightness", "volume", "camera", "settings", "torch", "scan",
+            "maps", "facebook", "twitter", "netflix", "telegram", "gallery", "clock", "calendar",
+            "kyun", "kyon", "rukk", "shuru", "band", "chalu"
+        )
+        /** The Live model. A normal text model cannot run a Live session. */
+        const val LIVE_MODEL = "gemini-3.8-live"
         private const val SESSION_WATCHDOG_MS = 30_000L
         private const val SPEAK_WATCHDOG_MS = 30_000L
 

@@ -225,6 +225,8 @@ private const val FS_SPRITE = """
 precision mediump float;
 uniform float uOpacity;
 uniform float uHot;
+uniform vec3 uTint;
+uniform vec3 uHotCol;
 varying vec2 vC;
 void main(){
   float d = length(vC);
@@ -239,8 +241,9 @@ void main(){
   else if (d < 0.28) c = mix(s1, s2, (d - 0.12) / 0.16);
   else if (d < 0.52) c = mix(s2, s3, (d - 0.28) / 0.24);
   else c = mix(s3, s4, (d - 0.52) / 0.48);
+  c.rgb *= uTint;
   float hot = uHot * (1.0 - smoothstep(0.0, 0.4, d));
-  c.rgb = mix(c.rgb, vec3(1.0, 0.93, 0.75), hot);
+  c.rgb = mix(c.rgb, uHotCol, hot);
   c.a = max(c.a, hot);
   gl_FragColor = vec4(pow(c.rgb, vec3(2.2)), c.a * uOpacity);
 }
@@ -489,6 +492,21 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
     private var pxScale = 1f
     private val startNs = System.nanoTime()
 
+    // Colour mood: 0 = normal (listening/idle), wThink = red while thinking, wSpeak = dark orange while speaking.
+    private var wThink = 0f
+    private var wSpeak = 0f
+    private var spriteTint = floatArrayOf(1f, 1f, 1f)
+    private var hotCol = floatArrayOf(1f, 0.93f, 0.75f)
+
+    private fun moodTint(c: FloatArray): FloatArray {
+        val r = floatArrayOf(c[0], c[1] * 0.22f, c[2] * 0.2f)
+        val d = floatArrayOf(c[0] * 0.62f, c[1] * 0.55f, c[2] * 0.45f)
+        return FloatArray(3) { i ->
+            val t = c[i] + (r[i] - c[i]) * wThink
+            t + (d[i] - t) * wSpeak
+        }
+    }
+
     private lateinit var meshP: Prog
     private lateinit var spriteP: Prog
     private lateinit var blurP: Prog
@@ -639,7 +657,6 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
             bl.add(Beam(tubeGeo(bp, false, if (i % 3 == 0) 0.014f else 0.009f), if (i % 2 == 1) C_ORANGE_GLOW else C_GOLD))
         }
         beams = bl
-        beams = bl
 
         // Sparks start at random points in their cycle, so they do not all move together.
         for (i in 0 until EN) {
@@ -753,7 +770,7 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
         GL.glUniformMatrix4fv(emberP.u("uMV"), 1, false, mv, 0)
         GL.glUniformMatrix4fv(emberP.u("uProj"), 1, false, proj, 0)
         GL.glUniform1f(emberP.u("uPxScale"), pxScale)
-        val c = lin(C_PARTICLE)
+        val c = lin(moodTint(C_PARTICLE))
         GL.glUniform4f(emberP.u("uColor"), c[0], c[1], c[2], 1f)
         GL.glUniform1f(emberP.u("uPointSize"), 0.05f)
         GL.glDrawArrays(GL.GL_POINTS, 0, EN)
@@ -769,7 +786,7 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
         GL.glVertexAttribPointer(aPos, 3, GL.GL_FLOAT, false, 0, 0)
         GL.glUniformMatrix4fv(meshP.u("uMV"), 1, false, mv, 0)
         GL.glUniformMatrix4fv(meshP.u("uProj"), 1, false, proj, 0)
-        val lc = lin(c)
+        val lc = lin(moodTint(c))
         GL.glUniform4f(meshP.u("uColor"), lc[0], lc[1], lc[2], alpha)
         GL.glUniform1f(meshP.u("uPointSize"), psize)
         GL.glUniform1f(meshP.u("uPxScale"), pxScale)
@@ -799,7 +816,10 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
         GL.glUniform1f(spriteP.u("uSize"), size * 0.5f)
         GL.glUniformMatrix4fv(spriteP.u("uProj"), 1, false, proj, 0)
         GL.glUniform1f(spriteP.u("uOpacity"), opacity)
-        GL.glUniform1f(spriteP.u("uHot"), hot)
+        // Bright centre stays while listening, turns red while thinking, and goes dark orange while speaking.
+        GL.glUniform1f(spriteP.u("uHot"), hot * (1f - wSpeak))
+        GL.glUniform3f(spriteP.u("uTint"), spriteTint[0], spriteTint[1], spriteTint[2])
+        GL.glUniform3f(spriteP.u("uHotCol"), hotCol[0], hotCol[1], hotCol[2])
         GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
     }
 
@@ -825,6 +845,11 @@ private class OrbRenderer(private val onTap: () -> Unit, private val onLongPress
             lvl > 0.02f -> 1.0f + minOf(lvl * 2.5f, 1f) * 0.6f
             else -> 1f
         }
+        // Smoothly move the colour mood towards the current state.
+        wThink += ((if (s == JarvisState.THINKING) 1f else 0f) - wThink) * 0.08f
+        wSpeak += ((if (s == JarvisState.SPEAKING) 1f else 0f) - wSpeak) * 0.08f
+        spriteTint = floatArrayOf(1f - wSpeak * 0.38f, (1f - wThink * 0.75f) * (1f - wSpeak * 0.45f), (1f - wThink * 0.8f) * (1f - wSpeak * 0.55f))
+        hotCol = floatArrayOf(1f, 0.93f - wThink * 0.58f, 0.75f - wThink * 0.5f)
         val speakPulse = if (s == JarvisState.SPEAKING) sin(t * 9f) * 0.08f else 0f
         curScale += (targetScale + speakPulse - curScale) * 0.08f
 

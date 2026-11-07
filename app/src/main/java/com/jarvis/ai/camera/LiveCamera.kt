@@ -40,6 +40,10 @@ object LiveCamera {
     @Volatile var active = false
     @Volatile var latestJpeg: String? = null
     @Volatile var provider: ProcessCameraProvider? = null
+    /** Document pages scanned by voice, in order (base64 JPEG). Cleared each time the camera opens. */
+    val pages = java.util.concurrent.CopyOnWriteArrayList<String>()
+    @Volatile var captureRequested = false
+    const val MAX_PAGES = 10
 }
 
 /** Full-screen live preview. It keeps a small, recent frame for questions. It does not take photos. */
@@ -57,6 +61,7 @@ fun LiveCameraScreen(onClose: () -> Unit) {
     BackHandler(onBack = onClose)
 
     DisposableEffect(Unit) {
+        LiveCamera.pages.clear()
         LiveCamera.active = true
         onDispose {
             LiveCamera.active = false
@@ -104,11 +109,16 @@ private fun bindCamera(ctx: android.content.Context, previewView: PreviewView, o
     }, ContextCompat.getMainExecutor(ctx))
 }
 
-/** Keeps about two frames a second, scaled to 640 px and as JPEG. Frames are not written to disk. */
+/**
+ * Keeps about two frames a second, scaled to 640 px and as JPEG. Frames are not written to disk.
+ * When a page scan is requested, the very next frame is kept at higher resolution so text can be read.
+ */
 private fun keepFrame(image: ImageProxy) {
     try {
         val now = System.currentTimeMillis()
-        if (!LiveCamera.active || now - lastFrameMs < 500L) return
+        if (!LiveCamera.active) return
+        val capture = LiveCamera.captureRequested
+        if (!capture && now - lastFrameMs < 500L) return
         lastFrameMs = now
         // Read the RGBA frame directly, so no extra CameraX helper is needed.
         val plane = image.planes[0]
@@ -117,15 +127,22 @@ private fun keepFrame(image: ImageProxy) {
         raw.copyPixelsFromBuffer(plane.buffer)
         val bmp = Bitmap.createBitmap(raw, 0, 0, image.width, image.height)
         val m = Matrix()
-        val scale = minOf(1f, 640f / maxOf(bmp.width, bmp.height))
+        val maxSide = if (capture) 1280f else 640f
+        val scale = minOf(1f, maxSide / maxOf(bmp.width, bmp.height))
         m.postScale(scale, scale)
         m.postRotate(image.imageInfo.rotationDegrees.toFloat())
         val frame = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
         val out = ByteArrayOutputStream()
         frame.compress(Bitmap.CompressFormat.JPEG, 75, out)
-        LiveCamera.latestJpeg = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        val jpeg = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        LiveCamera.latestJpeg = jpeg
+        if (capture) {
+            if (LiveCamera.pages.size < LiveCamera.MAX_PAGES) LiveCamera.pages.add(jpeg)
+            LiveCamera.captureRequested = false
+        }
     } catch (_: Exception) {
-        // A bad frame is skipped. The next one replaces it.
+        // A bad frame is skipped. The next one replaces it. A failed scan stops waiting.
+        LiveCamera.captureRequested = false
     } finally {
         image.close()
     }

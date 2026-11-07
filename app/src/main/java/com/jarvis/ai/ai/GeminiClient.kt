@@ -24,7 +24,8 @@ class GeminiClient {
         userPrompt: String,
         imageBase64: String? = null,
         expectJson: Boolean = true,
-        maxTokens: Int = MAX_OUTPUT_TOKENS
+        maxTokens: Int = MAX_OUTPUT_TOKENS,
+        extraImages: List<String> = emptyList()
     ): String = withContext(Dispatchers.IO) {
         var lastError: IOException? = null
         // First the chosen model, then the fallback. Each gets a second try when the failure is temporary.
@@ -33,7 +34,7 @@ class GeminiClient {
                 try {
                     return@withContext callOnce(
                         apiKey, candidate, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens,
-                        readMs(maxTokens, candidate)
+                        readMs(maxTokens, candidate), extraImages
                     )
                 } catch (e: IOException) {
                     lastError = e
@@ -67,7 +68,8 @@ class GeminiClient {
         imageBase64: String?,
         expectJson: Boolean,
         maxTokens: Int,
-        readTimeoutMs: Int
+        readTimeoutMs: Int,
+        extraImages: List<String>
     ): String {
         val connection = (URL("$BASE_URL/$model:generateContent").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -78,7 +80,7 @@ class GeminiClient {
             setRequestProperty("x-goog-api-key", apiKey)
         }
         try {
-            val body = buildBody(model, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens)
+            val body = buildBody(model, systemPrompt, userPrompt, imageBase64, expectJson, maxTokens, extraImages)
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -98,14 +100,16 @@ class GeminiClient {
         userPrompt: String,
         imageBase64: String?,
         expectJson: Boolean,
-        maxTokens: Int
+        maxTokens: Int,
+        extraImages: List<String>
     ): String {
         val parts = JSONArray().put(JSONObject().put("text", userPrompt))
-        if (imageBase64 != null) {
+        val images = listOfNotNull(imageBase64) + extraImages
+        for (img in images) {
             parts.put(
                 JSONObject().put(
                     "inlineData",
-                    JSONObject().put("mimeType", "image/jpeg").put("data", imageBase64)
+                    JSONObject().put("mimeType", "image/jpeg").put("data", img)
                 )
             )
         }

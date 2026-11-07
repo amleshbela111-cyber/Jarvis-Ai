@@ -41,6 +41,8 @@ class VoiceController(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
     private var beepMuted = false
+    /** True only after the recognizer reports that you started speaking. Silence never sends anything. */
+    private var speechBegan = false
     private val unmuteBeep = Runnable { setBeepMuted(false) }
 
     private var recognizer: SpeechRecognizer? = null
@@ -105,6 +107,7 @@ class VoiceController(
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 900L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 700L)
         }
+        speechBegan = false
         muteBeepBriefly()
         rec.startListening(intent)
     }
@@ -200,7 +203,8 @@ class VoiceController(
         }
 
         override fun onBeginningOfSpeech() {
-            // Nothing to do; the UI already shows LISTENING from onReadyForSpeech.
+            // You actually started talking. Only then may a result be sent as a command.
+            speechBegan = true
         }
 
         override fun onRmsChanged(rmsdB: Float) {
@@ -227,7 +231,9 @@ class VoiceController(
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 ?.firstOrNull()
                 .orEmpty()
-            if (text.isNotBlank()) {
+            // Low-confidence guesses (usually background noise) are dropped. -1 means the engine gave no score.
+            val confidence = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull() ?: -1f
+            if (speechBegan && text.isNotBlank() && (confidence < 0f || confidence >= 0.35f)) {
                 listener.onFinalResult(text)
             } else {
                 listener.onVoiceError("Didn't catch that. Try again.")

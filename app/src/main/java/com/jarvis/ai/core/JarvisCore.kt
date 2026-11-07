@@ -1,6 +1,7 @@
 package com.jarvis.ai.core
 
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
 import android.content.Context
 import com.jarvis.ai.accessibility.AccessibilityActions
 import com.jarvis.ai.voice.NaturalVoice
@@ -111,6 +112,23 @@ object JarvisCore {
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
     private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
+    /** Short voice commands that scan one page of a document while the live camera is open. */
+    private val PAGE_SCAN = Regex(
+        "^\\s*((ye|yeh|ये) )?((page|पेज) )?(scan|स्कैन)( karo| करो| kar do| कर दो)?\\s*[.!।]?\\s*$",
+        RegexOption.IGNORE_CASE
+    )
+    private val NEW_DOCUMENT = Regex(
+        "naya document|naya doc|new document|नया डॉक्यूमेंट|नया दस्तावेज",
+        RegexOption.IGNORE_CASE
+    )
+    private val TIME_QUESTION = Regex(
+        "kitne baje|\\btime kya|\\btime batao|samay kya|samay batao|समय क्या|समय बताओ|कितने बजे|टाइम क्या|टाइम बताओ",
+        RegexOption.IGNORE_CASE
+    )
+    private val DATE_QUESTION = Regex(
+        "aaj ki date|aaj kya date|\\bdate kya|\\bdate batao|aaj ki tareekh|आज की तारीख|आज क्या तारीख|तारीख क्या|तारीख बताओ",
+        RegexOption.IGNORE_CASE
+    )
 
     /** "neural waves synthesize karo ...": the answer is shown in the 3D neural view. */
     private val NEURAL_TRIGGER = Regex(
@@ -282,18 +300,47 @@ object JarvisCore {
     private val visionGemini = GeminiClient()
 
     private suspend fun answerFromCamera(command: String, d: Deps): String {
+        val pages = com.jarvis.ai.camera.LiveCamera.pages.toList()
         val frame = com.jarvis.ai.camera.LiveCamera.latestJpeg
-            ?: return "Camera abhi taiyar ho raha hai, ek second baad phir bolein."
+        if (pages.isEmpty() && frame == null) return "Camera abhi taiyar ho raha hai, ek second baad phir bolein."
         val apiKey = d.keys.load() ?: return "Gemini API key set nahi hai. Settings mein jaakar key daalein."
-        val answer = visionGemini.generate(
-            apiKey = apiKey,
-            model = d.settings.geminiModel,
-            systemPrompt = CAMERA_PROMPT,
-            userPrompt = command,
-            imageBase64 = frame,
-            expectJson = false
-        )
+        val answer = if (pages.isNotEmpty()) {
+            // Every scanned page goes in one request, in order, so the answer uses the whole document.
+            visionGemini.generate(
+                apiKey = apiKey,
+                model = d.settings.geminiModel,
+                systemPrompt = CAMERA_PROMPT,
+                userPrompt = "Ye ${pages.size} page ek hi document ke hain, sahi order mein. " +
+                    "Sab pages ko saath padh kar jawab dein. Sawaal: $command",
+                imageBase64 = pages.first(),
+                expectJson = false,
+                extraImages = pages.drop(1)
+            )
+        } else {
+            visionGemini.generate(
+                apiKey = apiKey,
+                model = d.settings.geminiModel,
+                systemPrompt = CAMERA_PROMPT,
+                userPrompt = command,
+                imageBase64 = frame,
+                expectJson = false
+            )
+        }
         return answer.trim().take(600)
+    }
+
+    /** Captures the next live frame as one document page. Speaks the result once it is kept. */
+    private suspend fun capturePage(): String {
+        val cam = com.jarvis.ai.camera.LiveCamera
+        if (cam.pages.size >= com.jarvis.ai.camera.LiveCamera.MAX_PAGES) {
+            return "Ek document mein ${com.jarvis.ai.camera.LiveCamera.MAX_PAGES} page tak hi scan hote hain. Naya document ke liye bolein."
+        }
+        val before = cam.pages.size
+        cam.captureRequested = true
+        withTimeoutOrNull(2_000L) { while (cam.captureRequested) delay(50L) }
+        if (cam.pages.size > before) return "Scan ho gaya. Page ${cam.pages.size}."
+        cam.captureRequested = false
+        return "Scan nahi ho paya. Page frame mein laayein aur phir bolein."
     }
 
     private suspend fun process(command: String): String {
@@ -328,9 +375,25 @@ object JarvisCore {
             }
         }
         // While the live camera is open, questions are answered from the latest camera frame.
-        if (com.jarvis.ai.camera.LiveCamera.active) return answerFromCamera(command, d)
+        if (com.jarvis.ai.camera.LiveCamera.active) {
+            if (PAGE_SCAN.containsMatchIn(command)) return capturePage()
+            if (NEW_DOCUMENT.containsMatchIn(command)) {
+                com.jarvis.ai.camera.LiveCamera.pages.clear()
+                return "Naya document shuru ho gaya. Page scan karne ke liye bolein."
+            }
+            return answerFromCamera(command, d)
+        }
         SettingsCommands.match(command, d.settings)?.let { return it }
         if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
+        // Time and date come from the phone's clock, so they are answered at once with no Gemini call.
+        if (TIME_QUESTION.containsMatchIn(command)) {
+            val f = java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH)
+            return "Abhi ${f.format(java.util.Date())} hain."
+        }
+        if (DATE_QUESTION.containsMatchIn(command)) {
+            val f = java.text.SimpleDateFormat("EEEE, d MMMM yyyy", java.util.Locale.ENGLISH)
+            return "Aaj ${f.format(java.util.Date())} hai."
+        }
         if (UPDATE_TRIGGER.containsMatchIn(command)) {
             com.jarvis.ai.update.UpdateFlow.promptMode = true
             com.jarvis.ai.update.UpdateFlow.panelVisible.value = true

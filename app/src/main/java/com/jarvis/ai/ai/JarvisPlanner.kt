@@ -36,7 +36,9 @@ class JarvisPlanner(private val gemini: GeminiClient) {
             )
         }
         return try {
-            val raw = gemini.generate(apiKey, model, SYSTEM_PROMPT, prompt)
+            // Short replies get a small output cap, so Gemini stops early instead of writing long text.
+            val maxTokens = 2048
+            val raw = gemini.generate(apiKey, model, SYSTEM_PROMPT, prompt, null, true, maxTokens)
             ActionPlanParser.parse(raw)
         } catch (e: CancellationException) {
             throw e
