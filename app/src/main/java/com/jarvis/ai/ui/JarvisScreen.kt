@@ -1,6 +1,7 @@
 package com.jarvis.ai.ui
 
 import com.jarvis.ai.camera.LiveCameraScreen
+import com.jarvis.ai.walkthrough.WalkthroughScreen
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -84,6 +85,7 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     var showSetup by rememberSaveable { mutableStateOf(false) }
     var showCamera by rememberSaveable { mutableStateOf(false) }
     val navRequest by ScreenNav.request.collectAsState()
+    val wtJson by com.jarvis.ai.walkthrough.Walkthrough.scene.collectAsState()
     LaunchedEffect(navRequest) {
         when (navRequest) {
             "settings" -> showSettings = true
@@ -136,7 +138,10 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     }
 
     Box(Modifier.fillMaxSize().background(JarvisBackground)) {
-        if (showSetup) {
+        if (wtJson != null) {
+            // The 3D walkthrough covers everything else while it is open.
+            WalkthroughScreen(json = wtJson ?: "", onClose = { com.jarvis.ai.walkthrough.Walkthrough.close() })
+        } else if (showSetup) {
             SetupScreen(
                 ui = ui,
                 onBack = { showSetup = false },

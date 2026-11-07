@@ -112,6 +112,13 @@ object JarvisCore {
     private val UPDATE_TRIGGER = Regex("(अपडेट|update)\\s+(जार्विस|जारविस|jarvis|jarwis)", RegexOption.IGNORE_CASE)
 
     private val BATTERY_QUESTION = Regex("battery|बैटरी|batery", RegexOption.IGNORE_CASE)
+    /** "3D mein samjhao" style requests: 3D word together with an explain/show word. */
+    private val WALKTHROUGH_REQUEST = Regex(
+        "(3d|3 d|three ?d|3डी|३डी|थ्री ?डी|३ डी).*(samjha|samjhao|dikha|dikhao|bana|banao|explain|show|समझा|दिखा|बना)|" +
+            "(samjha|samjhao|dikha|dikhao|explain|show|समझा|दिखा).*(3d|3 d|three ?d|3डी|३डी|थ्री ?डी|३ डी)",
+        RegexOption.IGNORE_CASE
+    )
+
     /** Short voice commands that scan one page of a document while the live camera is open. */
     private val PAGE_SCAN = Regex(
         "^\\s*((ye|yeh|ये) )?((page|पेज) )?(scan|स्कैन)( karo| करो| kar do| कर दो)?\\s*[.!।]?\\s*$",
@@ -343,6 +350,38 @@ object JarvisCore {
         return "Scan nahi ho paya. Page frame mein laayein aur phir bolein."
     }
 
+    /** Maps a short voice command to a viewer action and the reply to speak. */
+    private fun walkthroughControl(command: String): Pair<String, String>? {
+        val c = command.trim().lowercase().trimEnd('.', '!', '।')
+        val table = listOf(
+            Triple("pause", listOf("रुको", "रोको", "रुक जाओ", "pause", "ruko", "roko"), "Ruk gaya."),
+            Triple("play", listOf("चलाओ", "चालू करो", "play", "resume", "chalao", "chalu karo"), "Chal raha hai."),
+            Triple("next", listOf("आगे", "अगला", "next", "agla", "aage"), "Agla step."),
+            Triple("back", listOf("पीछे", "पिछला", "back", "pichla", "peeche"), "Pichhla step."),
+            Triple("spin", listOf("घुमाओ", "spin", "ghumao"), "Ghumana chalu ya band."),
+            Triple("close", listOf("बंद करो", "बंद", "band karo", "band", "close", "वापस जाओ", "wapas jao"), "Band kar diya.")
+        )
+        for ((action, words, reply) in table) {
+            if (c in words) return action to reply
+        }
+        return null
+    }
+
+    /** Builds a 3D walkthrough from the camera view or the scanned pages, then opens it. */
+    private suspend fun startWalkthrough(command: String, d: Deps): String {
+        val apiKey = d.keys.load() ?: return "Gemini API key set nahi hai. Settings mein jaakar key daalein."
+        val cam = com.jarvis.ai.camera.LiveCamera
+        val images = when {
+            !cam.active -> emptyList()
+            cam.pages.isNotEmpty() -> cam.pages.toList()
+            else -> listOfNotNull(cam.latestJpeg)
+        }
+        val json = com.jarvis.ai.walkthrough.WalkthroughBuilder.build(apiKey, d.settings.geminiModel, command, images)
+            ?: return "3D walkthrough nahi ban paya. Phir se bolein, ya sawaal thoda saaf karke poochein."
+        com.jarvis.ai.walkthrough.Walkthrough.open(json)
+        return "Ye lijiye, 3D walkthrough shuru ho raha hai."
+    }
+
     private suspend fun process(command: String): String {
         val d = requireDeps()
 
@@ -374,6 +413,17 @@ object JarvisCore {
                 else -> "Camera band kar raha hoon."
             }
         }
+        // While a 3D walkthrough is open, short commands control it (next, back, pause, play, spin, close).
+        if (com.jarvis.ai.walkthrough.Walkthrough.isOpen()) {
+            val (action, reply) = walkthroughControl(command) ?: (null to null)
+            if (action != null) {
+                if (action == "close") com.jarvis.ai.walkthrough.Walkthrough.close()
+                else com.jarvis.ai.walkthrough.Walkthrough.command(action)
+                return reply ?: "Theek hai."
+            }
+        }
+        // "3D mein samjhao" builds a 3D walkthrough from the camera (or scanned pages) and opens it.
+        if (WALKTHROUGH_REQUEST.containsMatchIn(command)) return startWalkthrough(command, d)
         // While the live camera is open, questions are answered from the latest camera frame.
         if (com.jarvis.ai.camera.LiveCamera.active) {
             if (PAGE_SCAN.containsMatchIn(command)) return capturePage()
