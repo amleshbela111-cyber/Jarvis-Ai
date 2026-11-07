@@ -46,7 +46,7 @@ Schema:
 {"title": "short title",
  "parts": [{"name": "unique_id", "label": "short Hinglish label", "type": "a shape name from the list below",
             "pos": [x,y,z], "scale": [sx,sy,sz], "rot": [rx,ry,rz] (radians), "color": "#rrggbb",
-            "metal": 0 to 1 (1 = polished metal, 0 = plastic, skin, organ, wood), "rough": 0 to 1 (0 = glossy, 1 = matte),
+            "metal": 0 to 1 (1 = polished metal, 0 = plastic, skin, organ, wood), "rough": 0 to 1 (0 = glossy, 1 = matte), "bump": 0 to 1 (fine surface texture: 0.3 to 0.6 for tissue, skin, bark, leaves; 0 for metal and glass),
             "dir": [dx,dy,dz] (direction the part moves when exploded, length about 1.5)},
            {"name": "unique_id", "label": "...", "from": [x,y,z], "to": [x,y,z], "r": radius, "color": "#rrggbb"}],
  "steps": [{"say": "2-3 short Hinglish sentences: what the part is, where it is, what it does", "hl": ["part names to highlight"],
@@ -67,6 +67,9 @@ Shapes:
   - api.onFrame(function(api, t, dt) {...}) runs every frame. t is seconds since the script started.
   - api.overlay(function(ctx, t, w, h) {...}) draws 2D on top of the scene with the canvas context ctx (w and h are the screen size in pixels). Use it for 2D diagrams, text, arrows and graphs.
   - api.say("text") speaks a line.
+  - api.surface(function(u, v) { return [x, y, z]; }, {name, label, color, metal, rough, res: 40}) builds a smooth, curved 3D surface from a formula. u and v go from 0 to 1. Use it for organic and curved parts: heart muscle walls, a bulging chamber, a curved aorta, a petal, a leaf, a bottle, a body outline. Write the real shape with math (sin, cos, exp, and so on), and make it as close to the real object as you can.
+  - api.tube(function(t) { return [x, y, z]; }, {name, label, r: 0.05, color, metal, rough}) makes a round tube that follows a curve, for t from 0 to 1. Use it for vessels, pipes, nerves and bent wires.
+  Always try for a realistic result. Even if a detail is hard, make the best approximation and use the part's real colour and material.
   Rules: plain JavaScript only, no fetch, no imports, no while(true) loops, no waiting. Keep the script under 120 lines. Use Math for motion, for example pos[1] = 0.3 * Math.sin(t * 2).
 - Full list of shape names: sphere, hemisphere, cylinder, cone, frustum, cube, box, cuboid, pyramid, pentpyramid, hexpyramid, tetrahedron, octahedron, icosahedron, dodecahedron, prism, pentprism, hexprism, torus, capsule, ellipsoid, disc, arrow, tube, circle2d, ring2d, rect2d, square2d, triangle2d, pentagon2d, hexagon2d, octagon2d, star2d, diamond2d, trapezoid2d, parallelogram2d, semicircle2d.
 Rules:
