@@ -45,7 +45,7 @@ fun GitHubSection() {
     OutlinedTextField(
         value = repo,
         onValueChange = { repo = it },
-        label = { Text("owner/repo, jaise amleshbela111-cyber/jarvis-apps") },
+        label = { Text("owner/repo, jaise your-name/your-repo") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth()
     )

@@ -42,15 +42,18 @@ const gl=canvas.getContext('webgl',{antialias:true,alpha:true});
 // Vertex shader: passes the world position and the correctly transformed normal.
 const VS=`attribute vec3 aP;
 attribute vec3 aN;
+attribute vec3 aC;
 uniform mat4 uMVP;
 uniform mat4 uM;
 uniform mat3 uNM;
 varying vec3 vN;
 varying vec3 vW;
+varying vec3 vCol;
 void main(){
   vec4 w=uM*vec4(aP,1.0);
   vW=w.xyz;
   vN=uNM*aN;
+  vCol=aC;
   gl_Position=uMVP*vec4(aP,1.0);
 }`;
 // Fragment shader: physically-styled lighting. Key light, soft fill, wrapped diffuse for soft organic shading,
@@ -58,6 +61,8 @@ void main(){
 const FS=`precision mediump float;
 varying vec3 vN;
 varying vec3 vW;
+varying vec3 vCol;
+uniform float uVC;
 uniform vec3 uC;
 uniform float uE;
 uniform vec3 uL;
@@ -79,7 +84,7 @@ void main(){
   vec3 v=normalize(uEye-vW);
   if(uBump>0.0) n=bumpN(n,vW);
   if(dot(n,v)<0.0) n=-n;
-  vec3 base=pow(uC,vec3(2.2));
+  vec3 base=pow(uVC>0.5?vCol:uC,vec3(2.2));
   vec3 key=normalize(uL);
   vec3 fillD=normalize(vec3(-0.7,0.2,-0.4));
   vec3 keyC=vec3(1.0,0.95,0.88)*1.15;
@@ -113,7 +118,8 @@ const prog=gl.createProgram();
 gl.attachShader(prog,sh(gl.VERTEX_SHADER,VS));
 gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,FS));
 gl.linkProgram(prog);gl.useProgram(prog);
-const loc={aP:gl.getAttribLocation(prog,'aP'),aN:gl.getAttribLocation(prog,'aN'),
+const loc={aP:gl.getAttribLocation(prog,'aP'),aN:gl.getAttribLocation(prog,'aN'),aC:gl.getAttribLocation(prog,'aC'),
+  uVC:gl.getUniformLocation(prog,'uVC'),
   uMVP:gl.getUniformLocation(prog,'uMVP'),uM:gl.getUniformLocation(prog,'uM'),
   uC:gl.getUniformLocation(prog,'uC'),uE:gl.getUniformLocation(prog,'uE'),uL:gl.getUniformLocation(prog,'uL'),
   uNM:gl.getUniformLocation(prog,'uNM'),uEye:gl.getUniformLocation(prog,'uEye'),
@@ -198,7 +204,9 @@ function buildTorus(seg,tub){const P=[],N=[];
 function mk(m){const pb=gl.createBuffer(),nb=gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER,pb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(m.P),gl.STATIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER,nb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(m.N),gl.STATIC_DRAW);
-  return {pb,nb,count:m.P.length/3}}
+  let cb=null;
+  if(m.C){cb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,cb);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(m.C),gl.STATIC_DRAW)}
+  return {pb,nb,cb,count:m.P.length/3}}
 // Square pyramid: base 1 unit square at y=-0.5, apex at y=0.5.
 function buildPyramid(){const P=[],N=[];const h=.5;
   const B=[[-h,-h,-h],[h,-h,-h],[h,-h,h],[-h,-h,h]],T=[0,h,0];
@@ -399,16 +407,26 @@ function closeViewer(){try{if(window.Android)Android.close()}catch(e){}}
 // fn(u,v) returns [x,y,z] for u,v in 0..1. The mesh is a grid of triangles with normals from the surface slopes.
 let surfCount=0;
 function safePt(p){return [Number(p[0])||0,Number(p[1])||0,Number(p[2])||0]}
-function buildSurface(fn,res){const P=[],N=[];const n=res;const e=1e-3;
-  const pt=(u,v)=>safePt(fn(u,v));
+// fn(u,v) returns [x,y,z] or, for a coloured mesh, [x,y,z,r,g,b] (colour 0..1 or 0..255).
+function buildSurface(fn,res){const P=[],N=[],C=[];const n=res;const e=1e-3;
+  let hasC=false;
+  const raw=(u,v)=>{const q=fn(u,v);const p=[Number(q[0])||0,Number(q[1])||0,Number(q[2])||0];
+    if(q.length>=6){hasC=true;let r=Number(q[3])||0,g=Number(q[4])||0,b=Number(q[5])||0;
+      if(r>1||g>1||b>1){r/=255;g/=255;b/=255}
+      const cl=x=>Math.max(0,Math.min(1,x));
+      return {p,c:[cl(r),cl(g),cl(b)]}}
+    return {p,c:[0.8,0.6,0.4]}};
+  const pt=(u,v)=>raw(u,v).p;
   const nrm=(u,v)=>{const pu=sub(pt(Math.min(1,u+e),v),pt(Math.max(0,u-e),v));
     const pv=sub(pt(u,Math.min(1,v+e)),pt(u,Math.max(0,v-e)));return norm(cross(pu,pv))};
   for(let i=0;i<n;i++)for(let j=0;j<n;j++){
     const u0=i/n,u1=(i+1)/n,v0=j/n,v1=(j+1)/n;
-    const a=pt(u0,v0),b=pt(u1,v0),c=pt(u1,v1),d=pt(u0,v1);
+    const A=raw(u0,v0),B=raw(u1,v0),Cc=raw(u1,v1),D=raw(u0,v1);
+    const a=A.p,b=B.p,c=Cc.p,d=D.p;
     const na=nrm(u0,v0),nb=nrm(u1,v0),nc=nrm(u1,v1),nd=nrm(u0,v1);
-    tri(P,N,a,b,c,na,nb,nc);tri(P,N,a,c,d,na,nc,nd);}
-  return {P,N}}
+    tri(P,N,a,b,c,na,nb,nc);tri(P,N,a,c,d,na,nc,nd);
+    C.push(...A.c,...B.c,...Cc.c,...A.c,...Cc.c,...D.c);}
+  return {P,N,C:hasC?C:null}}
 
 // ---------- scripts written by the model (run only inside this page) ----------
 // The script gets one object, api: add(shape, options), onFrame(fn), overlay(fn), say(text).
@@ -416,6 +434,7 @@ function buildSurface(fn,res){const P=[],N=[];const n=res;const e=1e-3;
 const ovEl=document.getElementById('ov');
 const octx=ovEl&&ovEl.getContext?ovEl.getContext('2d'):null;
 let frameHooks=[],overlayHooks=[],scriptT0=0,scriptApi=null;
+let lastVP=null,lastSP=null;
 function noteErr(m){const s=document.getElementById('say');s.textContent=m;s.style.display='block'}
 function makeApi(){
   return {
@@ -430,10 +449,23 @@ function makeApi(){
       parts.push(p);return p},
     onFrame(fn){if(typeof fn==='function')frameHooks.push(fn)},
     overlay(fn){if(typeof fn==='function')overlayHooks.push(fn)},
+    // api.project(x, y, z) -> [screenX, screenY] in pixels, or null when the point is behind the camera.
+    // Use it to place labels and leader lines exactly on the 3D part.
+    project(x,y,z){if(!lastVP)return null;
+      const c=xf(lastVP,xf(lastSP,[Number(x)||0,Number(y)||0,Number(z)||0,1]));
+      if(c[3]<=0)return null;
+      return [(c[0]/c[3]+1)/2*innerWidth,(1-c[1]/c[3])/2*innerHeight]},
     // api.surface(fn(u,v) => [x,y,z], {name, label, pos, scale, rot, color, metal, rough, res})
     surface(fn,o){o=o||{};if(typeof fn!=='function')return null;
       const key='surf'+(surfCount++);
       const res=clamp(Math.round(+o.res||40),8,80);
+      MESH[key]=mk(buildSurface(fn,res));
+      return this.add(key,o)},
+    // api.mesh(fn(u,v) => [x,y,z,r,g,b], {name, label, pos, scale, rot, res, metal, rough, bump})
+    // A curved surface where every point has its own colour, for realistic, coloured objects.
+    mesh(fn,o){o=o||{};if(typeof fn!=='function')return null;
+      const key='mesh'+(surfCount++);
+      const res=clamp(Math.round(+o.res||60),8,120);
       MESH[key]=mk(buildSurface(fn,res));
       return this.add(key,o)},
     // api.tube(curve(t) => [x,y,z], {r, res, ...}) makes a round tube that follows the curve for t in 0..1
@@ -561,6 +593,7 @@ function drawPiece(q,pos,rot,color,mat,emis,VP,SP,L,eye){
   gl.uniformMatrix4fv(loc.uM,false,M);
   gl.uniformMatrix3fv(loc.uNM,false,normMat(M));
   gl.uniform3fv(loc.uC,color);
+  gl.uniform1f(loc.uVC,m.cb?1:0);
   gl.uniform1f(loc.uE,emis);
   gl.uniform3fv(loc.uL,L);
   gl.uniform3fv(loc.uEye,eye);
@@ -571,6 +604,8 @@ function drawPiece(q,pos,rot,color,mat,emis,VP,SP,L,eye){
   gl.enableVertexAttribArray(loc.aP);gl.vertexAttribPointer(loc.aP,3,gl.FLOAT,false,0,0);
   gl.bindBuffer(gl.ARRAY_BUFFER,m.nb);
   gl.enableVertexAttribArray(loc.aN);gl.vertexAttribPointer(loc.aN,3,gl.FLOAT,false,0,0);
+  if(m.cb){gl.bindBuffer(gl.ARRAY_BUFFER,m.cb);gl.enableVertexAttribArray(loc.aC);gl.vertexAttribPointer(loc.aC,3,gl.FLOAT,false,0,0)}
+  else gl.disableVertexAttribArray(loc.aC);
   gl.drawArrays(gl.TRIANGLES,0,m.count);
 }
 
@@ -582,6 +617,7 @@ function draw(){
   const P=persp(.9,canvas.width/canvas.height,.1,100);
   const VP=mul(P,V);
   const SP=ry(spinA);
+  lastVP=VP;lastSP=SP;
   gl.clearColor(0,0,0,0);
   gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
   const L=[.4,.8,.6];

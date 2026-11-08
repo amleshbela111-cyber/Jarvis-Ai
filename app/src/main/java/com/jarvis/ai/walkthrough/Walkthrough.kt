@@ -69,11 +69,16 @@ Shapes:
   - api.say("text") speaks a line.
   - api.surface(function(u, v) { return [x, y, z]; }, {name, label, color, metal, rough, res: 40}) builds a smooth, curved 3D surface from a formula. u and v go from 0 to 1. Use it for organic and curved parts of ANY subject: a petal, a leaf, a bottle, a car body, a wing, a bridge arch, a shell, a planet's bulge, a river bend, a lens. Write the real shape with math (sin, cos, exp, and so on), and make it as close to the real object as you can.
   - api.tube(function(t) { return [x, y, z]; }, {name, label, r: 0.05, color, metal, rough}) makes a round tube that follows a curve, for t from 0 to 1. Use it for vessels, pipes, nerves and bent wires.
+  - api.project([x, y, z]) returns [screenX, screenY] in pixels for a 3D point (or null if hidden). Use it in api.overlay to draw leader lines from each label to its exact spot on the object, so labels sit precisely on the right part.
+  - api.mesh(function(u, v) { return [x, y, z, r, g, b]; }, {name, label, res: 60, metal, rough, bump}) makes a curved surface where EVERY point has its own colour (r, g, b from 0 to 1). Use it whenever the real object has several colours or shading across its surface, like a real photo: a fruit, an animal part, a planet with bands, a leaf with veins, a metal part with a painted band. Write the colour as a formula of u and v so it matches the picture, for example a bright band where v is near 0.5. Use res 60 to 100 for smooth results. This is the best tool for a realistic, coloured 3D result.
   Always try for a realistic result, for whatever the subject is. Even if a detail is hard, make the best approximation and use the part's real colour and material.
   Rules: plain JavaScript only, no fetch, no imports, no while(true) loops, no waiting. Keep the script under 120 lines. Use Math for motion, for example pos[1] = 0.3 * Math.sin(t * 2).
 - Full list of shape names: sphere, hemisphere, cylinder, cone, frustum, cube, box, cuboid, pyramid, pentpyramid, hexpyramid, tetrahedron, octahedron, icosahedron, dodecahedron, prism, pentprism, hexprism, torus, capsule, ellipsoid, disc, arrow, tube, circle2d, ring2d, rect2d, square2d, triangle2d, pentagon2d, hexagon2d, octagon2d, star2d, diamond2d, trapezoid2d, parallelogram2d, semicircle2d.
 Rules:
-- Use 25 to 60 parts and 6 to 12 steps. Enough parts to show the real structure: chambers, valves, vessels, main organs, connections.
+- CODE-ONLY RULE (most important): build the subject ONLY with the script (api.mesh, api.surface, api.tube), never with the primitive shape names in the list above (no sphere, cube, cylinder, box, cone, torus and so on for the subject). Set "parts": [] in the JSON and put everything in "script", including small details, built with api.mesh so they match the picture.
+- Precise placement: measure the reference picture carefully. Put each part where it really sits relative to the others, keep the real proportions and the real colours of each region, and make sure parts touch or overlap the way they do in the picture.
+- Labels and lines: for every important part, call api.add with a "label" and a short Hinglish name, or use api.overlay with api.project to draw a thin leader line from the label to the exact point on that part. Keep labels off each other.
+- Use 6 to 12 steps. Enough parts to show the real structure: chambers, valves, vessels, main organs, connections.
 - The subject is ONLY what the user asked for (their question is in the user message). Build that exact subject, from its real structure. Never substitute a different subject, and never default to the human body, the heart or any organ unless the question asks for it. Examples of the range: an engine, a solar system, a plant cell, a circuit, a bridge, a camera lens, a volcano, a house, a water cycle, a molecule, a computer, a tree.
 - Centre the subject near 0,0,0, no wider than about 4 units.
 - Give every part a unique name and a short label. Use a warm colour palette: oranges, reds, golds, with a darker red for deeper parts.
@@ -101,7 +106,9 @@ Rules:
         val task = if (drawn != null) {
             "User ka sawaal (yahi subject banana hai, koi aur nahi): $question\n" +
                 "The first picture is a reference drawing of the subject. Recreate that exact picture in 3D code: " +
-                "match its shapes, proportions, layout, colours and materials as closely as you can."
+                "match its shapes, proportions, layout, colours and materials as closely as you can. " +
+                "Build the curved, coloured parts with api.mesh so each point carries the colour seen in the picture, " +
+                "and use api.surface, api.tube and the primitive shapes for the rest."
         } else {
             "User ka sawaal (yahi subject banana hai, koi aur nahi): $question"
         }

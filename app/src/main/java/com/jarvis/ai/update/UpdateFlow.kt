@@ -25,7 +25,6 @@ object UpdateFlow {
     private const val CLAUDE_PACKAGE = "com.anthropic.claude"
     private const val TERMUX_PACKAGE = "com.termux"
     private const val CLAUDE_FALLBACK = "https://claude.ai/new"
-    private const val ACTIONS_URL = "https://github.com/amleshbela111-cyber/Jarvis-Ai/actions"
 
     fun copy(context: Context, text: String) {
         runCatching {
@@ -44,7 +43,11 @@ object UpdateFlow {
 
     fun openTermux(context: Context) = openApp(context, TERMUX_PACKAGE, null)
 
-    fun openGithubActions(context: Context) = openUrl(context, ACTIONS_URL)
+    /** Opens the Actions page of the repo saved in Settings. Falls back to GitHub's home page when none is saved. */
+    fun openGithubActions(context: Context) {
+        val repo = runCatching { com.jarvis.ai.security.GitHubStore(context).repo() }.getOrNull()
+        openUrl(context, if (repo.isNullOrBlank()) "https://github.com" else "https://github.com/$repo/actions")
+    }
 
     private fun openApp(context: Context, pkg: String, fallbackUrl: String?) {
         val intent = context.packageManager.getLaunchIntentForPackage(pkg)
