@@ -60,6 +60,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- Fires task reminders at their set time, even when Jarvis is closed. -->
+        <receiver
+            android:name=".reminders.ReminderReceiver"
+            android:exported="false" />
+
         <!-- Accessibility service: taps, scrolling, typing, and reading the screen. The user must enable it. -->
         <service
             android:name=".accessibility.JarvisAccessibilityService"

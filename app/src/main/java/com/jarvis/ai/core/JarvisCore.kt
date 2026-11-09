@@ -154,6 +154,8 @@ object JarvisCore {
     private val PUSH_WORDS = Regex("गिटहब|गिटहब|github|पुश|पूश|पूस|push", RegexOption.IGNORE_CASE)
 
     private var appContext: android.content.Context? = null
+    // Stops a routine from starting another routine inside itself.
+    private var routineDepth = 0
 
     /** Battery level, read straight from Android. No internet needed. */
     private fun batteryReply(): String {
@@ -177,6 +179,10 @@ object JarvisCore {
         if (deps != null) return
         val app = context.applicationContext
         appContext = app
+        com.jarvis.ai.tasks.TaskStore.init(app)
+        com.jarvis.ai.reminders.Reminders.rescheduleAll(app)
+        com.jarvis.ai.automation.MoodTracker.init(app)
+        com.jarvis.ai.automation.Routines.init(app)
         val settings = JarvisSettings(app)
         val keys = ApiKeyStore(app)
         NaturalVoice.apiKeyProvider = { keys.load() }
@@ -234,13 +240,16 @@ object JarvisCore {
         job?.cancel()
         job = scope.launch {
             silentControl = false
-            val reply = try {
+            val raw = try {
                 handle(text)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 friendlyError(e)
             }
+            // When the spoken words sound upset, Jarvis answers with a caring line first.
+            val care = if (raw.isNotBlank()) com.jarvis.ai.automation.MoodTracker.empathyLine(text) else null
+            val reply = if (care != null) care + raw else raw
             onReply(reply, !silentControl)
         }
     }
@@ -390,6 +399,8 @@ object JarvisCore {
             com.jarvis.ai.update.UpdateFlow.draft.value = command
             return "Prompt taiyar hai. Screen par CLAUDE button dabaiye."
         }
+        // Mood is noted from every spoken line, stored on the phone only.
+        com.jarvis.ai.automation.MoodTracker.record(command)
         // "Live mode on/off": switches between the normal mic and Gemini Live.
         if (Regex("(live mode|लाइव मोड)", RegexOption.IGNORE_CASE).containsMatchIn(command)) {
             val off = Regex("(off|band|बंद|बन्द|stop)", RegexOption.IGNORE_CASE).containsMatchIn(command)
@@ -435,6 +446,24 @@ object JarvisCore {
         }
         SettingsCommands.match(command, d.settings)?.let { return it }
         if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
+        // Tasks and reminders: "काम जोड़ो", "8 बजे याद दिलाओ", "मेरे काम दिखाओ", "काम पूरा करो", "काम हटाओ".
+        appContext?.let { ctx -> com.jarvis.ai.tasks.TaskCommands.handle(command, ctx)?.let { return it } }
+        // Mood: "मेरा मूड कैसा है" gets an answer from the last 24 hours.
+        com.jarvis.ai.automation.MoodTracker.answerIfAsked(command)?.let { return it }
+        // Routines: create, list and delete here; running one runs its steps in order.
+        com.jarvis.ai.automation.Routines.manage(command)?.let { return it }
+        if (routineDepth == 0) {
+            com.jarvis.ai.automation.Routines.stepsToRun(command)?.let { (name, steps) ->
+                if (steps.isEmpty()) return "Aisa koi routine nahi mila."
+                routineDepth++
+                try {
+                    val replies = steps.map { process(it) }
+                    return "Routine $name poora hua. " + replies.joinToString(" ")
+                } finally {
+                    routineDepth--
+                }
+            }
+        }
         // Time and date come from the phone's clock, so they are answered at once with no Gemini call.
         if (TIME_QUESTION.containsMatchIn(command)) {
             val f = java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH)
