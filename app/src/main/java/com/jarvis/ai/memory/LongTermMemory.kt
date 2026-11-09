@@ -18,7 +18,10 @@ object LongTermMemory {
     private val REMEMBER = Regex("^\\s*(?:याद रखो|yaad rakho|remember that|remember)\\s+(.+)$", RegexOption.IGNORE_CASE)
     private val FORGET_A = Regex("^\\s*(?:भूल जाओ|bhool jao|forget)\\s+(.+)$", RegexOption.IGNORE_CASE)
     private val FORGET_B = Regex("^\\s*(.+?)\\s+(?:भूल जाओ|bhool jao)\\s*$", RegexOption.IGNORE_CASE)
-    private val RECALL = Regex("(मेरे बारे में क्या याद|क्या याद है|what do you remember|what do you know about me)", RegexOption.IGNORE_CASE)
+    // Likes and dislikes the user states out loud, for example "मुझे चाय पसंद है" or "मुझे भीड़ पसंद नहीं".
+    private val LIKE = Regex("^\\s*(?:मुझे|mujhe)\\s+(.+?)\\s+(?:पसंद है|pasand hai|पसंद)\\s*$", RegexOption.IGNORE_CASE)
+    private val DISLIKE = Regex("^\\s*(?:मुझे|mujhe)\\s+(.+?)\\s+(?:पसंद नहीं|pasand nahi|पसंद नहीं है)\\s*$", RegexOption.IGNORE_CASE)
+    private val RECALL =Regex("(मेरे बारे में क्या याद|क्या याद है|what do you remember|what do you know about me)", RegexOption.IGNORE_CASE)
 
     fun init(context: Context) {
         if (prefs == null) prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -32,6 +35,17 @@ object LongTermMemory {
             if (fact.isEmpty()) return "Kya yaad rakhun, ye bataiye."
             save((facts().filter { !it.second.equals(fact, ignoreCase = true) } + Pair(System.currentTimeMillis(), fact)).takeLast(MAX))
             return "Theek hai, yaad rakh liya: $fact."
+        }
+        DISLIKE.find(command)?.let { m ->
+            val item = m.groupValues[1].trim()
+            save((facts().filter { !it.second.equals("User likes: $item", true) } + Pair(System.currentTimeMillis(), "User dislikes: $item")).takeLast(MAX))
+            return "Theek hai, yaad rakh liya ki aapko $item pasand nahi."
+        }
+        LIKE.find(command)?.let { m ->
+            val item = m.groupValues[1].trim()
+            if (DISLIKE.containsMatchIn(command)) return null
+            save((facts().filter { !it.second.equals("User dislikes: $item", true) } + Pair(System.currentTimeMillis(), "User likes: $item")).takeLast(MAX))
+            return "Theek hai, yaad rakh liya ki aapko $item pasand hai."
         }
         (FORGET_A.find(command) ?: FORGET_B.find(command))?.let { m ->
             val needle = m.groupValues[1].trim().lowercase()

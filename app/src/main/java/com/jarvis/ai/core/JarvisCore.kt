@@ -185,6 +185,7 @@ object JarvisCore {
         com.jarvis.ai.automation.Routines.init(app)
         com.jarvis.ai.memory.LongTermMemory.init(app)
         com.jarvis.ai.learning.StylePolicy.init(app)
+        com.jarvis.ai.goals.Goals.init(app)
         val settings = JarvisSettings(app)
         val keys = ApiKeyStore(app)
         NaturalVoice.apiKeyProvider = { keys.load() }
@@ -454,6 +455,15 @@ object JarvisCore {
         com.jarvis.ai.memory.LongTermMemory.manage(command)?.let { return it }
         // Learning: praise or complaint about the last reply, and the neural network demo.
         com.jarvis.ai.learning.StylePolicy.answerIfFeedback(command)?.let { return it }
+        // Goals and decisions: Jarvis plans steps, runs light ones itself, and asks before risky ones.
+        com.jarvis.ai.goals.GoalCommands.handle(command, d.keys.load(), d.settings.geminiModel) { step -> process(step) }
+            ?.let { reply ->
+                // Remaining goal steps continue in the background, every two hours.
+                appContext?.let { ctx ->
+                    if (com.jarvis.ai.goals.Goals.nextStep() != null) com.jarvis.ai.reminders.Reminders.scheduleGoalStep(ctx, 120)
+                }
+                return reply
+            }
         // Mood: "मेरा मूड कैसा है" gets an answer from the last 24 hours.
         com.jarvis.ai.automation.MoodTracker.answerIfAsked(command)?.let { return it }
         // Routines: create, list and delete here; running one runs its steps in order.

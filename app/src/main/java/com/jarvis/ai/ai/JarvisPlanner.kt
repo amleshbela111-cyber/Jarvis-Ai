@@ -34,6 +34,17 @@ class JarvisPlanner(private val gemini: GeminiClient) {
                 appendLine(memory)
                 appendLine()
             }
+            // Thinking style: how a thoughtful person reasons. It does not change the JSON format.
+            appendLine(
+                "Thinking style: understand what the user really wants before acting. " +
+                    "If the request is unclear in a way that matters, ask one short question instead of guessing. " +
+                    "Say plainly when you are not sure, never invent facts, and keep the tone warm and honest. " +
+                    "Use the recent conversation and remembered facts when they are relevant. " +
+                    "Do not claim to be a human or to have feelings. " +
+                    "Tone for this reply: ${com.jarvis.ai.automation.MoodTracker.toneFor(userText)}. " +
+                    "Let that tone show naturally in the wording, without overdoing it."
+            )
+            appendLine()
             if (deep) {
                 appendLine("Deep mode: this is a complex question. Work through it carefully step by step, check the result before you reply, and give a clear final answer. Keep the required JSON format.")
                 appendLine()

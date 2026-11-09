@@ -60,6 +60,22 @@ object MoodTracker {
         return latest.second == "neg"
     }
 
+    private val JOKE = Regex("(मज़ाक|मजाक|joke|हंसा|हँसा|funny|lol|😂)", RegexOption.IGNORE_CASE)
+    private val EXCITE = Regex("(वाह|wow|क्या बात|बहुत बढ़िया|yay|awesome|amazing|जीत|जीता|हुर्रे)", RegexOption.IGNORE_CASE)
+    private val ANGRY = Regex("(गुस्सा|गुस्से|चिढ़|चिढ़ा|angry|annoyed|frustrat|पागल कर)", RegexOption.IGNORE_CASE)
+
+    /**
+     * The tone a thoughtful person would use for this message: supportive, celebratory, playful,
+     * steady (when the user is angry), or plain. This is the tone of the reply, not a feeling Jarvis claims to have.
+     */
+    fun toneFor(command: String): String = when {
+        NEG.containsMatchIn(command) -> "supportive"
+        ANGRY.containsMatchIn(command) -> "steady and calm, acknowledge the frustration, do not argue"
+        EXCITE.containsMatchIn(command) || POS.containsMatchIn(command) -> "celebratory and warm"
+        JOKE.containsMatchIn(command) -> "playful, a light joke is fine"
+        else -> "plain and natural"
+    }
+
     /** A short caring line to put in front of the reply, only when the spoken words themselves sound upset. */
     fun empathyLine(command: String): String? =
         if (NEG.containsMatchIn(command)) "Koi baat nahi, main sath hoon. " else null
