@@ -183,6 +183,8 @@ object JarvisCore {
         com.jarvis.ai.reminders.Reminders.rescheduleAll(app)
         com.jarvis.ai.automation.MoodTracker.init(app)
         com.jarvis.ai.automation.Routines.init(app)
+        com.jarvis.ai.memory.LongTermMemory.init(app)
+        com.jarvis.ai.learning.StylePolicy.init(app)
         val settings = JarvisSettings(app)
         val keys = ApiKeyStore(app)
         NaturalVoice.apiKeyProvider = { keys.load() }
@@ -448,6 +450,10 @@ object JarvisCore {
         if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
         // Tasks and reminders: "काम जोड़ो", "8 बजे याद दिलाओ", "मेरे काम दिखाओ", "काम पूरा करो", "काम हटाओ".
         appContext?.let { ctx -> com.jarvis.ai.tasks.TaskCommands.handle(command, ctx)?.let { return it } }
+        // Long-term memory: "याद रखो ...", "भूल जाओ ...", "मेरे बारे में क्या याद है".
+        com.jarvis.ai.memory.LongTermMemory.manage(command)?.let { return it }
+        // Learning: praise or complaint about the last reply, and the neural network demo.
+        com.jarvis.ai.learning.StylePolicy.answerIfFeedback(command)?.let { return it }
         // Mood: "मेरा मूड कैसा है" gets an answer from the last 24 hours.
         com.jarvis.ai.automation.MoodTracker.answerIfAsked(command)?.let { return it }
         // Routines: create, list and delete here; running one runs its steps in order.
@@ -540,7 +546,7 @@ object JarvisCore {
 
         // A hard limit on the whole thinking step, so the user never waits forever.
         val planResult = withTimeoutOrNull(PLAN_TIMEOUT_MS) {
-            d.planner.plan(apiKey, d.settings.geminiModel, command, history, d.settings.replyStyle)
+            d.planner.plan(apiKey, d.settings.geminiModel, command, history, d.settings.replyStyle, com.jarvis.ai.ai.DeepMode.wants(command))
         }
         if (planResult == null) {
             ActivityLog.add(command, "plan", false, "Time limit reached.")

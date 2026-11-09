@@ -59,9 +59,9 @@ class JarvisSettings(context: Context) {
             prefs.edit().putString(KEY_GEMINI_MODEL, value).apply()
         }
 
-    /** "short" (1-2 sentences) or "detailed" (up to 5 sentences). */
+    /** "short" (1-2 sentences), "detailed" (up to 5 sentences), or "auto" (learned from the user's feedback). */
     var replyStyle: String
-        get() = prefs.getString(KEY_REPLY_STYLE, "short") ?: "short"
+        get() = prefs.getString(KEY_REPLY_STYLE, "auto") ?: "auto"
         set(value) {
             prefs.edit().putString(KEY_REPLY_STYLE, value).apply()
         }

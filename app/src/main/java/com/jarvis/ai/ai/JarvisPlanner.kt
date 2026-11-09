@@ -15,12 +15,29 @@ class JarvisPlanner(private val gemini: GeminiClient) {
         model: String,
         userText: String,
         recentHistory: List<String>,
-        replyStyle: String = "short"
+        replyStyle: String = "auto",
+        deep: Boolean = false
     ): Result<ValidatedPlan> {
         if (!modelPattern.matches(model)) {
             return Result.failure(IllegalArgumentException("Invalid Gemini model name: $model"))
         }
+        // "auto" lets the learned preference pick short or detailed replies. Deep mode always writes detailed.
+        val style = when {
+            deep -> "detailed"
+            replyStyle == "auto" -> com.jarvis.ai.learning.StylePolicy.choose()
+            else -> replyStyle
+        }
+        com.jarvis.ai.learning.StylePolicy.markUsed(style)
+        val memory = com.jarvis.ai.memory.LongTermMemory.promptContext()
         val prompt = buildString {
+            if (memory.isNotEmpty()) {
+                appendLine(memory)
+                appendLine()
+            }
+            if (deep) {
+                appendLine("Deep mode: this is a complex question. Work through it carefully step by step, check the result before you reply, and give a clear final answer. Keep the required JSON format.")
+                appendLine()
+            }
             if (recentHistory.isNotEmpty()) {
                 appendLine("Recent conversation:")
                 recentHistory.forEach { appendLine("- $it") }
@@ -28,7 +45,7 @@ class JarvisPlanner(private val gemini: GeminiClient) {
             }
             append("User command: ").append(userText).appendLine()
             append(
-                if (replyStyle == "detailed") {
+                if (style == "detailed") {
                     "Reply length: up to five natural sentences."
                 } else {
                     "Reply length: one or two short natural sentences."
@@ -37,7 +54,8 @@ class JarvisPlanner(private val gemini: GeminiClient) {
         }
         return try {
             // Short replies get a small output cap, so Gemini stops early instead of writing long text.
-            val maxTokens = 2048
+            // Deep mode gets a much bigger budget so long reasoning is not cut off.
+            val maxTokens = if (deep) 8192 else 2048
             val raw = gemini.generate(apiKey, model, SYSTEM_PROMPT, prompt, null, true, maxTokens)
             ActionPlanParser.parse(raw)
         } catch (e: CancellationException) {

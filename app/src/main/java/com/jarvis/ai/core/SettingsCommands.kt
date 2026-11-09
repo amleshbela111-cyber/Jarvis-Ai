@@ -59,6 +59,10 @@ object SettingsCommands {
 
         if (t.contains("jawab") || t.contains("answer") || t.contains("reply")) {
             return when {
+                Regex("auto|ऑटो|apne aap|apne-aap|khud|seekh").containsMatchIn(t) -> {
+                    s.replyStyle = "auto"
+                    "Theek hai, ab main aapke feedback se seekh kar jawab ki lambai chununga."
+                }
                 Regex("chhota|chhote|chota|short|mukhtasar|kam").containsMatchIn(t) -> {
                     s.replyStyle = "short"
                     "Theek hai, ab chhota jawab dunga."
