@@ -323,6 +323,19 @@ object JarvisCore {
         val frame = com.jarvis.ai.camera.LiveCamera.latestJpeg
         if (pages.isEmpty() && frame == null) return "Camera abhi taiyar ho raha hai, ek second baad phir bolein."
         val apiKey = d.keys.load() ?: return "Gemini API key set nahi hai. Settings mein jaakar key daalein."
+        // Cheap path: Groq has already described the view in words, so Gemini answers from that text and no image is sent.
+        val note = viewNote
+        if (pages.isEmpty() && note.isNotBlank()) {
+            return visionGemini.generate(
+                apiKey = apiKey,
+                model = d.settings.geminiModel,
+                systemPrompt = CAMERA_PROMPT,
+                userPrompt = "Camera abhi ye dikha raha hai (ek AI ne abhi dekh kar bataya): \"$note\". " +
+                    "Is jaankari ke aadhaar par sawaal ka jawab dein, aur jo jaankari na ho use andaaza na lagayein. Sawaal: $command",
+                imageBase64 = null,
+                expectJson = false
+            ).trim().take(600)
+        }
         val answer = if (pages.isNotEmpty()) {
             // Every scanned page goes in one request, in order, so the answer uses the whole document.
             visionGemini.generate(
@@ -346,6 +359,74 @@ object JarvisCore {
             )
         }
         return answer.trim().take(600)
+    }
+
+    /** Optional hook set by the voice service. Speaks a short line when the voice loop is free. */
+    @Volatile
+    var spokenNoticeHandler: ((String) -> Unit)? = null
+
+    private var cameraJob: Job? = null
+    /** The latest short description of the camera view (from Groq). Questions use this text, not the image. */
+    @Volatile
+    private var viewNote = ""
+
+    /** Called by the camera screen when it opens (true) or closes (false). Opening starts watching the view. */
+    fun cameraScreenChanged(open: Boolean) {
+        cameraJob?.cancel()
+        cameraJob = null
+        if (open) cameraJob = scope.launch { watchCamera() }
+    }
+
+    /** While the camera is open, names what comes into view. Only a changed view (from LiveCamera) is sent. */
+    private suspend fun watchCamera() {
+        val cam = com.jarvis.ai.camera.LiveCamera
+        var seen = -1L
+        var last = ""
+        while (cam.active) {
+            if (cam.sceneVersion != seen) {
+                seen = cam.sceneVersion
+                val frame = cam.latestJpeg
+                if (frame != null) {
+                    val line = describeFrame(frame, last)
+                    if (line.isNotBlank() && !line.equals("SAME", ignoreCase = true) && cam.active) {
+                        last = line
+                        viewNote = line
+                        append(Sender.JARVIS, line)
+                        spokenNoticeHandler?.invoke(line)
+                    }
+                    // A short pause keeps the quota low, even when the view keeps changing.
+                    delay(500L)
+                }
+            }
+            delay(150L)
+        }
+    }
+
+    /** Groq vision first (fast). If no Groq key is saved, Gemini answers instead. Returns "" on failure. */
+    private suspend fun describeFrame(frame: String, last: String): String {
+        val context = appContext ?: return ""
+        val prompt = "Abhi is camera view mein kya hai, ek chhoti line mein Hinglish mein: saamne ki cheez aur uski halat. " +
+            (if (last.isBlank()) "" else "Pichhli baat thi: \"$last\". Agar kuch naya ya zaroori badla na ho to sirf SAME likhein. ") +
+            "Bina bullet ke."
+        val groqKey = com.jarvis.ai.security.GroqKeyStore(context).load()
+        return try {
+            if (!groqKey.isNullOrBlank()) {
+                withContext(Dispatchers.IO) { com.jarvis.ai.camera.GroqVision.describe(groqKey, frame, prompt) }.take(200)
+            } else {
+                val d = deps ?: return ""
+                val apiKey = d.keys.load() ?: return ""
+                visionGemini.generate(
+                    apiKey = apiKey,
+                    model = d.settings.geminiModel,
+                    systemPrompt = CAMERA_PROMPT,
+                    userPrompt = prompt,
+                    imageBase64 = frame,
+                    expectJson = false
+                ).trim().take(200)
+            }
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     /** Captures the next live frame as one document page. Speaks the result once it is kept. */
@@ -451,6 +532,8 @@ object JarvisCore {
         if (BATTERY_QUESTION.containsMatchIn(command)) return batteryReply()
         // Tasks and reminders: "काम जोड़ो", "8 बजे याद दिलाओ", "मेरे काम दिखाओ", "काम पूरा करो", "काम हटाओ".
         appContext?.let { ctx -> com.jarvis.ai.tasks.TaskCommands.handle(command, ctx)?.let { return it } }
+        // Away mode: "बाहर जा रहा हूँ" turns on call replies, "वापस आ गया" turns them off and lists missed calls.
+        appContext?.let { ctx -> com.jarvis.ai.calls.AwayCommands.handle(command, ctx)?.let { return it } }
         // Long-term memory: "याद रखो ...", "भूल जाओ ...", "मेरे बारे में क्या याद है".
         com.jarvis.ai.memory.LongTermMemory.manage(command)?.let { return it }
         // Learning: praise or complaint about the last reply, and the neural network demo.
@@ -620,6 +703,8 @@ object JarvisCore {
             "Ho gaya. ${b.files.size} files ${b.repo} par push ho gayi. Build GitHub Actions mein chal raha hai, aur fail hua to main sudhar kar dobara bhejunga."
         } catch (e: IOException) {
             "GitHub par push nahi ho paya: ${e.message?.take(120)}"
+        } catch (e: org.json.JSONException) {
+            "GitHub ka jawab samajh nahi aaya, dobara try karein."
         }
     }
 

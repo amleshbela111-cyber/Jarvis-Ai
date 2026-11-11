@@ -1,21 +1,32 @@
 package com.jarvis.ai.github
 
 import android.util.Base64
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 /** One file to commit. [path] is relative to the repo root, for example "app/src/main/AndroidManifest.xml". */
 data class RepoFile(val path: String, val content: String)
 
 /**
- * Minimal GitHub contents API client. The token goes in a header only, never in the URL.
- * Each call creates or updates one file on the repo's default branch.
+ * Minimal GitHub client. The token goes in a header only, never in the URL.
+ *
+ * Note: HttpURLConnection refuses the PATCH method (and DELETE with a body), so every write call goes through OkHttp.
  */
 class GitHubClient(private val token: String) {
+
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     /** Creates or updates [file] in "owner/repo". Throws an IOException with a short message on failure. */
     fun putFile(ownerRepo: String, file: RepoFile, message: String) {
@@ -118,30 +129,9 @@ class GitHubClient(private val token: String) {
         return JSONObject(text)
     }
 
-    private fun request2(method: String, path: String, body: String?): Pair<Int, String> {
-        val url = URL("https://api.github.com/repos/$path")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 10_000
-            readTimeout = 30_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            if (body != null) {
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-            }
-        }
-        try {
-            if (body != null) connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            return code to text
-        } finally {
-            connection.disconnect()
-        }
-    }
+    /** Sends one request to the Git Data API under "repos/<path>". */
+    private fun request2(method: String, path: String, body: String?): Pair<Int, String> =
+        send(method, "https://api.github.com/repos/$path", body)
 
     /** Returns the blob sha of an existing file, or null when the file does not exist yet. */
     private fun existingSha(ownerRepo: String, path: String): String? {
@@ -167,27 +157,21 @@ class GitHubClient(private val token: String) {
         val encodedPath = path.split("/").joinToString("/") { segment ->
             URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
         }
-        val url = URL("https://api.github.com/repos/$ownerRepo/contents/$encodedPath")
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 10_000
-            readTimeout = 30_000
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("Authorization", "Bearer $token")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            if (body != null) {
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json")
-            }
-        }
-        try {
-            if (body != null) connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            return code to text
-        } finally {
-            connection.disconnect()
+        return send(method, "https://api.github.com/repos/$ownerRepo/contents/$encodedPath", body)
+    }
+
+    /** The one place that talks to GitHub. Returns the HTTP code and the response text. */
+    private fun send(method: String, url: String, body: String?): Pair<Int, String> {
+        val requestBody = body?.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "application/vnd.github+json")
+            .header("Authorization", "Bearer $token")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .method(method, requestBody)
+            .build()
+        http.newCall(request).execute().use { response ->
+            return response.code to response.body?.string().orEmpty()
         }
     }
 }

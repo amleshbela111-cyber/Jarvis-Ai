@@ -61,20 +61,32 @@ object NaturalVoice {
         job = scope.launch {
             try {
                 onStart()
-                // Each sentence is made in parallel, and played as soon as it is ready. Speech starts early.
-                // One part is made ahead while the current part plays, so at most two requests run at once.
-                // Many parallel requests at once hit the rate limit (HTTP 429).
-                coroutineScope {
-                    val parts = splitSentences(text)
-                    var next: Deferred<ByteArray>? = async { synthesizeWithFallback(key, parts[0]) }
-                    for (i in parts.indices) {
-                        val current = next?.await() ?: break
-                        next = if (i + 1 < parts.size) {
-                            async { synthesizeWithFallback(key, parts[i + 1]) }
-                        } else {
-                            null
+                // First choice: one streaming request for the whole reply. Sound starts with the first audio chunk.
+                var played = false
+                val streamed = try {
+                    streamAll(key, text) { played = true }
+                    true
+                } catch (e: Exception) {
+                    // Nothing was played yet: use the sentence-by-sentence path below instead.
+                    if (played) throw e
+                    false
+                }
+                if (!streamed) {
+                    // Each sentence is made in parallel, and played as soon as it is ready. Speech starts early.
+                    // One part is made ahead while the current part plays, so at most two requests run at once.
+                    // Many parallel requests at once hit the rate limit (HTTP 429).
+                    coroutineScope {
+                        val parts = splitSentences(text)
+                        var next: Deferred<ByteArray>? = async { synthesizeWithFallback(key, parts[0]) }
+                        for (i in parts.indices) {
+                            val current = next?.await() ?: break
+                            next = if (i + 1 < parts.size) {
+                                async { synthesizeWithFallback(key, parts[i + 1]) }
+                            } else {
+                                null
+                            }
+                            play(current)
                         }
-                        play(current)
                     }
                 }
                 onDone()
@@ -184,7 +196,144 @@ object NaturalVoice {
         }
     }
 
-    private suspend fun play(pcm: ByteArray) {
+    /**
+     * Fades the last 80 ms of a sentence to silence and adds 60 ms of silence after it.
+     * This stops the hard cut at the end, which is what makes a hiss or a click.
+     */
+    private fun withFadeOut(raw: ByteArray): ByteArray {
+        val samples = raw.size / 2
+        val fadeSamples = minOf(samples, SAMPLE_RATE * 80 / 1000)
+        val tailSamples = SAMPLE_RATE * 60 / 1000
+        val out = ByteArray(raw.size + tailSamples * 2)
+        System.arraycopy(raw, 0, out, 0, raw.size)
+        val start = samples - fadeSamples
+        for (i in 0 until fadeSamples) {
+            val gain = 1f - (i + 1f) / fadeSamples
+            val idx = (start + i) * 2
+            val s = ((out[idx].toInt() and 0xff) or (out[idx + 1].toInt() shl 8)).toShort()
+            val v = (s * gain).toInt()
+            out[idx] = (v and 0xff).toByte()
+            out[idx + 1] = (v shr 8).toByte()
+        }
+        return out
+    }
+
+    private const val STREAM_MODEL = "gemini-3.1-flash-tts-preview"
+    /** The last 80 ms are held back while streaming, so the end can be faded out once the stream finishes. */
+    private const val TAIL_BYTES = SAMPLE_RATE * 80 / 1000 * 2
+
+    /**
+     * Plays the whole [text] from one streaming request. Each audio chunk is written to the track as it arrives.
+     * Throws when no audio arrives, so the caller can fall back to the sentence path.
+     */
+    private fun streamAll(apiKey: String, text: String, markPlayed: () -> Unit) {
+        val bufBytes = maxOf(
+            AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT),
+            SAMPLE_RATE / 2 * 2 // 0.5 second
+        )
+        val audio = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(SAMPLE_RATE)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufBytes)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build()
+        track = audio
+        try {
+            audio.play()
+            var tail = ByteArray(0)
+            var gotAudio = false
+            streamRequest(apiKey, text) { chunk ->
+                gotAudio = true
+                markPlayed()
+                val all = tail + chunk
+                var writeLen = all.size - minOf(TAIL_BYTES, all.size)
+                writeLen -= writeLen % 2 // whole 16-bit samples only
+                if (writeLen > 0) writeAll(audio, all, writeLen)
+                tail = all.copyOfRange(writeLen, all.size)
+            }
+            if (!gotAudio) throw IllegalStateException("no audio in stream")
+            val last = tail.copyOf(tail.size - tail.size % 2)
+            val ending = withFadeOut(last)
+            writeAll(audio, ending, ending.size)
+            // The track still has up to one buffer of sound to play. Wait for it, then release.
+            Thread.sleep(bufBytes * 1000L / (SAMPLE_RATE * 2) + 200L)
+        } finally {
+            runCatching { audio.stop() }
+            runCatching { audio.flush() }
+            runCatching { audio.release() }
+            if (track === audio) track = null
+        }
+    }
+
+    /** Writes [len] bytes. Returns quietly when the track was stopped by [stop]. */
+    private fun writeAll(audio: AudioTrack, data: ByteArray, len: Int) {
+        var off = 0
+        while (off < len) {
+            val n = audio.write(data, off, len - off)
+            if (n <= 0) return
+            off += n
+        }
+    }
+
+    private fun ttsBody(text: String): JSONObject = JSONObject()
+        .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", text)))))
+        .put(
+            "generationConfig",
+            JSONObject()
+                .put("responseModalities", JSONArray().put("AUDIO"))
+                .put(
+                    "speechConfig",
+                    JSONObject().put(
+                        "voiceConfig",
+                        JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", VOICE))
+                    )
+                )
+        )
+
+    /** Reads the server-sent events of one streaming TTS request and passes each audio chunk on. */
+    private fun streamRequest(apiKey: String, text: String, onAudio: (ByteArray) -> Unit) {
+        val connection = (URL("https://generativelanguage.googleapis.com/v1beta/models/$STREAM_MODEL:streamGenerateContent?alt=sse")
+            .openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("x-goog-api-key", apiKey)
+        }
+        try {
+            connection.outputStream.use { it.write(ttsBody(text).toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) throw IllegalStateException("TTS error $code")
+            connection.inputStream.bufferedReader().useLines { lines ->
+                for (line in lines) {
+                    if (!line.startsWith("data:")) continue
+                    val json = line.removePrefix("data:").trim()
+                    if (json.isEmpty()) continue
+                    val data = JSONObject(json).optJSONArray("candidates")?.optJSONObject(0)
+                        ?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)
+                        ?.optJSONObject("inlineData")?.optString("data").orEmpty()
+                    if (data.isNotEmpty()) onAudio(Base64.decode(data, Base64.DEFAULT))
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private suspend fun play(raw: ByteArray) {
+        val pcm = withFadeOut(raw)
         val audio = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -210,6 +359,7 @@ object NaturalVoice {
             delay(pcm.size * 1000L / (SAMPLE_RATE * 2) + 200L)
         } finally {
             runCatching { audio.stop() }
+            runCatching { audio.flush() }
             runCatching { audio.release() }
             if (track === audio) track = null
         }

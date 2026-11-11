@@ -67,6 +67,12 @@ class ListeningService : Service(), VoiceController.Listener {
         super.onCreate()
         JarvisCore.init(this)
         voice = VoiceController(this, this)
+        // Short camera notes are spoken only when the voice loop is free, so they never cut into a command.
+        JarvisCore.spokenNoticeHandler = { text ->
+            handler.post {
+                if (!busy && JarvisCore.settings().speakResponses) voice.speak(text)
+            }
+        }
         wake = WakeWordListener(this) { handler.post { onWakeWord() } }.also { it.preload() }
         startAsForeground()
     }
@@ -156,7 +162,13 @@ class ListeningService : Service(), VoiceController.Listener {
         }
         sessionActive = true
         val startedAt = System.currentTimeMillis()
-        val session = com.jarvis.ai.live.LiveVoice(key, LIVE_MODEL, LIVE_PROMPT) { msg ->
+        // While the camera is open, its frames are sent to Live, which describes what it sees as it changes.
+        val session = com.jarvis.ai.live.LiveVoice(
+            key,
+            LIVE_MODEL,
+            LIVE_PROMPT,
+            null
+        ) { msg ->
             handler.post {
                 if (msg.contains("band")) {
                     live = null

@@ -43,8 +43,14 @@ object LiveCamera {
     /** Document pages scanned by voice, in order (base64 JPEG). Cleared each time the camera opens. */
     val pages = java.util.concurrent.CopyOnWriteArrayList<String>()
     @Volatile var captureRequested = false
+    /** Goes up every time the view changes enough to matter (something new came into view). Checked on the phone, so idle views cost nothing. */
+    @Volatile var sceneVersion = 0L
     const val MAX_PAGES = 10
 }
+
+/** How many of the 64 tiny-picture bits must flip to count as a real change, not just camera noise. */
+private const val CHANGE_BITS = 10
+private var lastSceneHash = 0L
 
 /** Full-screen live preview. It keeps a small, recent frame for questions. It does not take photos. */
 @Composable
@@ -63,8 +69,11 @@ fun LiveCameraScreen(onClose: () -> Unit) {
     DisposableEffect(Unit) {
         LiveCamera.pages.clear()
         LiveCamera.active = true
+        // Live watches the camera while this screen is open.
+        com.jarvis.ai.core.JarvisCore.cameraScreenChanged(true)
         onDispose {
             LiveCamera.active = false
+            com.jarvis.ai.core.JarvisCore.cameraScreenChanged(false)
             LiveCamera.latestJpeg = null
             LiveCamera.provider?.unbindAll()
         }
@@ -126,8 +135,20 @@ private fun keepFrame(image: ImageProxy) {
         val raw = Bitmap.createBitmap(paddedW, image.height, Bitmap.Config.ARGB_8888)
         raw.copyPixelsFromBuffer(plane.buffer)
         val bmp = Bitmap.createBitmap(raw, 0, 0, image.width, image.height)
+        // A 8x8 "fingerprint" of the view (average hash). A change in enough bits means the scene changed.
+        val tiny = Bitmap.createScaledBitmap(bmp, 8, 8, true)
+        val px = IntArray(64)
+        tiny.getPixels(px, 0, 8, 0, 0, 8, 8)
+        val gray = DoubleArray(64) { i -> (((px[i] shr 16) and 0xff) + ((px[i] shr 8) and 0xff) + (px[i] and 0xff)) / 3.0 }
+        val avg = gray.average()
+        var hash = 0L
+        for (i in 0 until 64) if (gray[i] > avg) hash = hash or (1L shl i)
+        if (java.lang.Long.bitCount(hash xor lastSceneHash) >= CHANGE_BITS) LiveCamera.sceneVersion++
+        lastSceneHash = hash
+        tiny.recycle()
         val m = Matrix()
-        val maxSide = if (capture) 1280f else 640f
+        // Small frames: faster upload and a faster answer. Text reading (scans) still uses the big size.
+        val maxSide = if (capture) 1280f else 384f
         val scale = minOf(1f, maxSide / maxOf(bmp.width, bmp.height))
         m.postScale(scale, scale)
         m.postRotate(image.imageInfo.rotationDegrees.toFloat())

@@ -46,7 +46,7 @@ Schema:
 {"title": "short title",
  "parts": [{"name": "unique_id", "label": "short Hinglish label", "type": "a shape name from the list below",
             "pos": [x,y,z], "scale": [sx,sy,sz], "rot": [rx,ry,rz] (radians), "color": "#rrggbb",
-            "metal": 0 to 1 (1 = polished metal, 0 = plastic, skin, organ, wood), "rough": 0 to 1 (0 = glossy, 1 = matte), "bump": 0 to 1 (fine surface texture: 0.3 to 0.6 for tissue, skin, bark, leaves; 0 for metal and glass),
+            "metal": 0 to 1 (1 = polished metal, 0 = plastic, skin, organ, wood), "rough": 0 to 1 (0 = glossy, 1 = matte), "bump": 0 to 1 (fine surface texture: 0.3 to 0.6 for tissue, skin, bark, leaves; 0 for metal and glass), "plasma": 0 to 1 (animated glowing energy skin, for a live or energy-filled part such as a flame, a reactor core or a nerve signal; 0 for everything else),
             "dir": [dx,dy,dz] (direction the part moves when exploded, length about 1.5)},
            {"name": "unique_id", "label": "...", "from": [x,y,z], "to": [x,y,z], "r": radius, "color": "#rrggbb"}],
  "steps": [{"say": "2-3 short Hinglish sentences: what the part is, where it is, what it does", "hl": ["part names to highlight"],

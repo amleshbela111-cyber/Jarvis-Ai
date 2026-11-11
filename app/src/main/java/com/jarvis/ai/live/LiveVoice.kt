@@ -29,6 +29,8 @@ class LiveVoice(
     private val apiKey: String,
     private val model: String,
     private val systemPrompt: String,
+    /** Returns the newest camera frame (base64 JPEG), or null. Sent about once a second while set. */
+    private val videoFrame: (() -> String?)?,
     private val onState: (String) -> Unit
 ) {
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
@@ -38,6 +40,7 @@ class LiveVoice(
     private var track: AudioTrack? = null
     private var micThread: Thread? = null
     private var playExecutor: ExecutorService? = null
+    private var frameThread: Thread? = null
 
     fun start() {
         if (running) return
@@ -84,6 +87,8 @@ class LiveVoice(
         runCatching { recorder?.release() }
         recorder = null
         micThread = null
+        frameThread?.interrupt()
+        frameThread = null
         runCatching { track?.stop() }
         runCatching { track?.release() }
         track = null
@@ -96,6 +101,7 @@ class LiveVoice(
         val json = runCatching { JSONObject(text) }.getOrNull() ?: return
         if (json.has("setupComplete")) {
             startMic()
+            startFrames()
             onState("Sun raha hoon...")
             return
         }
@@ -206,6 +212,33 @@ class LiveVoice(
         socket?.send(msg.toString())
     }
 
+    // ---------- Camera frames ----------
+
+    /** Sends the newest camera frame about once a second, but only when it has changed. Live then sees what is in view. */
+    private fun startFrames() {
+        val source = videoFrame ?: return
+        frameThread = Thread {
+            var lastSent: String? = null
+            while (running) {
+                val jpeg = runCatching { source() }.getOrNull()
+                if (jpeg != null && jpeg !== lastSent) {
+                    lastSent = jpeg
+                    socket?.send(
+                        JSONObject().put(
+                            "realtimeInput",
+                            JSONObject().put("video", JSONObject().put("data", jpeg).put("mimeType", "image/jpeg"))
+                        ).toString()
+                    )
+                }
+                try {
+                    Thread.sleep(FRAME_EVERY_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }.also { it.start() }
+    }
+
     private fun sendStreamEnd() {
         socket?.send(JSONObject().put("realtimeInput", JSONObject().put("audioStreamEnd", true)).toString())
     }
@@ -228,5 +261,6 @@ class LiveVoice(
         const val SPEECH_RMS = 600.0
         const val PREROLL_FRAMES = 15   // 300 ms kept before speech starts
         const val TAIL_FRAMES = 25      // 500 ms of quiet sent after speech before stopping
+        const val FRAME_EVERY_MS = 1000L // camera frames per second sent to Live
     }
 }
