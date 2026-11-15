@@ -7,3 +7,6 @@
 -keep class com.sun.jna.** { *; }
 -keepclassmembers class * extends com.sun.jna.* { public *; }
 -dontwarn java.awt.**
+
+# The coding study sandbox calls Android.done() from JavaScript, so its bridge method must keep its name.
+-keepclassmembers class com.jarvis.ai.study.JsSandbox$Bridge { *; }

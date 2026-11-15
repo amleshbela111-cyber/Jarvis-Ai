@@ -1,6 +1,7 @@
 package com.jarvis.ai.ui
 
 import com.jarvis.ai.camera.LiveCameraScreen
+import com.jarvis.ai.study.StudyProgress
 import com.jarvis.ai.walkthrough.WalkthroughScreen
 
 import android.Manifest
@@ -84,6 +85,8 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showSetup by rememberSaveable { mutableStateOf(false) }
     var showCamera by rememberSaveable { mutableStateOf(false) }
+    var showCodingStudy by rememberSaveable { mutableStateOf(false) }
+    var codingLanguage by rememberSaveable { mutableStateOf("JavaScript") }
     val navRequest by ScreenNav.request.collectAsState()
     val wtJson by com.jarvis.ai.walkthrough.Walkthrough.scene.collectAsState()
     LaunchedEffect(navRequest) {
@@ -102,6 +105,12 @@ fun JarvisApp(viewModel: JarvisViewModel) {
                 }
             }
             "camera_off" -> showCamera = false
+            "coding_study" -> {
+                // The language named in the command, else the one used last time.
+                codingLanguage = ScreenNav.codingLanguage ?: StudyProgress.lastLanguage(context) ?: "JavaScript"
+                showCodingStudy = true
+            }
+            "coding_study_off" -> showCodingStudy = false
         }
         if (navRequest != null) ScreenNav.request.value = null
     }
@@ -138,6 +147,10 @@ fun JarvisApp(viewModel: JarvisViewModel) {
     }
 
     Box(Modifier.fillMaxSize().background(JarvisBackground)) {
+        // Coding study opens as a popup over whatever is showing.
+        if (showCodingStudy) {
+            CodingStudyPopup(initialLanguage = codingLanguage, onClose = { showCodingStudy = false })
+        }
         if (wtJson != null) {
             // The 3D walkthrough covers everything else while it is open.
             WalkthroughScreen(json = wtJson ?: "", onClose = { com.jarvis.ai.walkthrough.Walkthrough.close() })

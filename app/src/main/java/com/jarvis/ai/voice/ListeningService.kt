@@ -210,7 +210,7 @@ class ListeningService : Service(), VoiceController.Listener {
             return
         }
         netScope.launch {
-            val pcm = withContext(Dispatchers.IO) { GroqSpeech.recordUtterance() }
+            val pcm = withContext(Dispatchers.IO) { GroqSpeech.recordUtterance(onLevel = { JarvisCore.setSoundLevel(it) }) }
             if (pcm == null) {
                 sessionActive = false
                 if (!busy) scheduleRestart(RESTART_DELAY_MS)

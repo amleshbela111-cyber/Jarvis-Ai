@@ -96,7 +96,8 @@ object JarvisCore {
     private val PLAN_TIMEOUT_MS = 40_000L
 
     /** Building a whole app takes longer than a normal answer. */
-    private val BUILD_TIMEOUT_MS = 150_000L
+    // Each file is its own AI call now, so a bigger app needs more time than one call did.
+    private val BUILD_TIMEOUT_MS = 1_200_000L
 
     private val SCREEN_CONTROL = setOf(
         com.jarvis.ai.ai.ActionType.TAP,
@@ -197,7 +198,7 @@ object JarvisCore {
             app, device, accessibility, screen, ProjectWorkspace(app), ApkInstaller(app)
         )
         deps = Deps(settings, keys, device, accessibility, JarvisPlanner(gemini), executor)
-        builder = AppBuilder(gemini)
+        builder = AppBuilder(gemini) { appContext?.let { com.jarvis.ai.security.OpenRouterKeyStore(it).load() } }
         loadHistory(app)
 
         // Warm up the connection to Gemini in the background, so the first real question is faster.
@@ -499,12 +500,17 @@ object JarvisCore {
             }
         }
         screenNavFor(command)?.let { target ->
+            if (target == "coding_study") {
+                com.jarvis.ai.ui.ScreenNav.codingLanguage = com.jarvis.ai.study.CodingLanguages.fromCommand(command)
+            }
             com.jarvis.ai.ui.ScreenNav.request.value = target
             return when (target) {
                 "settings" -> "Settings khol raha hoon."
                 "setup" -> "Setup khol raha hoon."
                 "camera" -> "Live camera khol raha hoon."
                 "system_camera" -> "Camera app khol raha hoon."
+                "coding_study" -> "Coding study popup khol raha hoon. Wahan topic likhiye, main code sikhaunga aur phone par chala kar dikhaunga."
+                "coding_study_off" -> "Coding study band kar raha hoon."
                 else -> "Camera band kar raha hoon."
             }
         }
@@ -663,7 +669,7 @@ object JarvisCore {
             return "GitHub repo aur token pehle Settings mein daalein, phir dobara bolein."
         }
         val files = withTimeoutOrNull(BUILD_TIMEOUT_MS) {
-            appBuilder.build(apiKey, d.settings.geminiModel, command)
+            appBuilder.build(apiKey, d.settings.geminiModel, command, com.jarvis.ai.security.GroqKeyStore(context).load())
         } ?: return "App banane mein zyada time lag gaya. Chhota idea bolein."
 
         pendingBuild = PendingBuild(repo, files)

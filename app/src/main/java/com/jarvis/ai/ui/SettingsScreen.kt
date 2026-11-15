@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.jarvis.ai.core.JarvisCore
 import com.jarvis.ai.model.SpeechLanguage
 import com.jarvis.ai.security.GroqKeyStore
+import com.jarvis.ai.security.OpenRouterKeyStore
 import com.jarvis.ai.voice.PhoneVoices
 import androidx.compose.runtime.LaunchedEffect
 import com.jarvis.ai.storage.ActivityLog
@@ -180,6 +181,7 @@ fun SettingsScreen(
         GitHubSection()
 
         GroqSection()
+        OpenRouterSection()
 
         VoskSection()
 
@@ -317,6 +319,64 @@ private fun PermissionRow(
                 Text("Stop")
             }
         }
+    }
+}
+
+/** OpenRouter key for free backup models (used when Gemini fails while building apps). Stored encrypted. */
+@Composable
+private fun OpenRouterSection() {
+    val context = LocalContext.current
+    val store = remember { OpenRouterKeyStore(context) }
+    var saved by remember { mutableStateOf(store.isSet()) }
+    var input by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf("") }
+
+    SectionTitle("Backup AI (OpenRouter free models)")
+    Text(
+        text = if (saved) "OpenRouter key: saved (encrypted on this phone)" else "OpenRouter key: not set (no backup AI)",
+        color = if (saved) JarvisCyan else JarvisMuted,
+        fontSize = 13.sp
+    )
+    OutlinedTextField(
+        value = input,
+        onValueChange = { input = it },
+        label = { Text("OpenRouter API key") },
+        singleLine = true,
+        visualTransformation = PasswordVisualTransformation(),
+        colors = jarvisFieldColors(),
+        modifier = Modifier.fillMaxWidth()
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            onClick = {
+                val key = input.trim()
+                if (key.length < 20) {
+                    message = "OpenRouter key bahut chhoti lag rahi hai."
+                } else {
+                    runCatching { store.save(key) }
+                        .onSuccess { message = "OpenRouter key save ho gayi." }
+                        .onFailure { message = "OpenRouter key save nahi ho payi: ${it.message?.take(60)}" }
+                    input = ""
+                    saved = store.isSet()
+                }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan, contentColor = JarvisBackground)
+        ) {
+            Text("Save key")
+        }
+        OutlinedButton(
+            onClick = {
+                runCatching { store.clear() }
+                message = "OpenRouter key hata di."
+                saved = store.isSet()
+            },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = JarvisError)
+        ) {
+            Text("Remove key")
+        }
+    }
+    if (message.isNotBlank()) {
+        Text(text = message, color = JarvisText, fontSize = 13.sp)
     }
 }
 

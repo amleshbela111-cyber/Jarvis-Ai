@@ -10,6 +10,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.log10
+import kotlin.math.sqrt
 
 /**
  * Speech-to-text with Groq's Whisper model. Jarvis records one sentence itself, stops when the speaker is
@@ -26,7 +28,7 @@ object GroqSpeech {
     private const val LOUD_PEAK = 1500
 
     /** Records until the speaker has been quiet for [silenceMs], or [maxMs] has passed. Null when nothing was said. */
-    fun recordUtterance(maxMs: Long = 12_000L, silenceMs: Long = 900L): ByteArray? {
+    fun recordUtterance(maxMs: Long = 12_000L, silenceMs: Long = 900L, onLevel: (Float) -> Unit = {}): ByteArray? {
         val minBuffer = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (minBuffer <= 0) return null
         val recorder = AudioRecord(
@@ -51,13 +53,17 @@ object GroqSpeech {
                 val read = recorder.read(buffer, 0, buffer.size)
                 if (read <= 0) break
                 var peak = 0
+                var sumSq = 0.0
                 for (i in 0 until read) {
                     val v = buffer[i].toInt()
                     pcm.write(v and 0xFF)
                     pcm.write((v shr 8) and 0xFF)
                     val a = if (v < 0) -v else v
                     if (a > peak) peak = a
+                    sumSq += v.toDouble() * v
                 }
+                // Feeds the orb, so it grows with the speaker's voice.
+                onLevel(levelOf(sumSq, read))
                 val now = System.currentTimeMillis()
                 if (peak > LOUD_PEAK) {
                     heardVoice = true
@@ -68,8 +74,19 @@ object GroqSpeech {
         } finally {
             runCatching { recorder.stop() }
             recorder.release()
+            onLevel(0f)
         }
         return if (heardVoice) pcm.toByteArray() else null
+    }
+
+    /**
+     * One block of audio as a 0..1 level for the orb. Quiet room is near 0, normal speech near the top.
+     * Uses the block's loudness in decibels, so it follows how loud the speaker really is.
+     */
+    private fun levelOf(sumSq: Double, count: Int): Float {
+        val rms = sqrt(sumSq / count) / 32768.0
+        val db = 20.0 * log10(rms + 1e-9)
+        return ((db + 50.0) / 40.0).toFloat().coerceIn(0f, 1f)
     }
 
     /** Sends the audio to Groq and returns the recognized text. Throws IOException with a short message on failure. */

@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.chaquo.python")
 }
 
 android {
@@ -16,8 +17,8 @@ android {
             // Modern phones are 64-bit ARM. One ABI keeps the APK small.
             abiFilters += listOf("arm64-v8a")
         }
-        versionCode = 100
-        versionName = "2.40.0"
+        versionCode = 109
+        versionName = "2.40.9"
     }
 
     buildTypes {
@@ -44,6 +45,13 @@ android {
     buildFeatures {
         compose = true
         aidl = true
+    }
+}
+
+// Python for the coding study mode. The runner file is in src/main/python.
+chaquopy {
+    defaultConfig {
+        version = "3.12"
     }
 }
 
